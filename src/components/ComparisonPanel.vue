@@ -25,6 +25,13 @@ import {
   NEmpty,
   NScrollbar,
   NDropdown,
+  NModal,
+  NForm,
+  NFormItem,
+  NInputNumber,
+  NRadio,
+  NRadioGroup,
+  NSwitch,
 } from 'naive-ui';
 import {
   CloseOutline,
@@ -41,13 +48,40 @@ import {
   EyeOutline,
   EyeOffOutline,
   ChevronDownOutline,
+  ChevronUpOutline,
+  SaveOutline,
+  ArrowUndoOutline,
+  ArchiveOutline,
+  SettingsOutline,
+  LocateOutline,
+  CopyOutline,
+  PlayOutline,
+  PauseOutline,
 } from '@vicons/ionicons5';
 import type { SavedScheme } from '../types/layout';
-import type { DiffCategory, DiffSeverity, ReportExportOptions } from '../types/comparison';
+import type {
+  DiffCategory,
+  DiffSeverity,
+  ReportExportOptions,
+  SortField,
+  SortOrder,
+  ReportTemplate,
+  CustomAuditRule,
+  CustomRuleField,
+  CustomRuleOperator,
+  DiffItem,
+} from '../types/comparison';
 import {
   DIFF_CATEGORY_LABELS,
   AUDIT_ISSUE_TYPE_LABELS,
   MAX_COMPARE_SCHEMES,
+  SORT_FIELD_LABELS,
+  SORT_ORDER_LABELS,
+  REPORT_TEMPLATES,
+  CUSTOM_RULE_FIELD_LABELS,
+  CUSTOM_RULE_OPERATOR_LABELS,
+  ARCHIVE_TYPE_LABELS,
+  SEVERITY_ORDER,
 } from '../types/comparison';
 
 const comparisonStore = useComparisonStore();
@@ -80,6 +114,11 @@ const auditFilterOptions = [
   { label: '仅提示', value: 'info' },
 ];
 
+const sortFieldOptions = Object.entries(SORT_FIELD_LABELS).map(([value, label]) => ({
+  label,
+  value,
+}));
+
 type TagType = 'default' | 'error' | 'info' | 'success' | 'warning' | 'primary';
 
 const severityColors: Record<DiffSeverity, TagType> = {
@@ -95,6 +134,13 @@ const severityIcons: Record<DiffSeverity, any> = {
   info: InformationCircleOutline,
   success: CheckmarkCircleOutline,
 };
+
+const severityFilterOptions: { label: string; value: DiffSeverity; type: TagType }[] = [
+  { label: '错误', value: 'error', type: 'error' },
+  { label: '警告', value: 'warning', type: 'warning' },
+  { label: '提示', value: 'info', type: 'info' },
+  { label: '正常', value: 'success', type: 'success' },
+];
 
 function handleToggleScheme(schemeId: string): void {
   if (!comparisonStore.isSelected(schemeId) && comparisonStore.isMaxReached) {
@@ -138,12 +184,7 @@ function handleExportReport(format: 'json' | 'csv' | 'txt'): void {
     message.warning('请先选择至少两套方案进行对比');
     return;
   }
-  const options: ReportExportOptions = {
-    format,
-    includeDetails: true,
-    includeSchemes: true,
-  };
-  comparisonStore.exportComparisonReport(options);
+  comparisonStore.exportReportWithCurrentTemplate(format);
   message.success('报告导出成功');
 }
 
@@ -191,7 +232,7 @@ async function handleBatchExport(key: string): Promise<void> {
     onPositiveClick: async () => {
       message.loading(`正在导出 ${schemeCount} 个文件...`, { duration: 2000 });
       await comparisonStore.batchExport(format, dpi);
-      message.success(`已导出 ${schemeCount} 个文件`);
+      message.success(`已导出 ${schemeCount} 个文件，记录已归档`);
     },
   });
 }
@@ -203,6 +244,276 @@ function handleClose(): void {
 function formatTimestamp(ts: number): string {
   return new Date(ts).toLocaleString('zh-CN');
 }
+
+function handleSortFieldChange(field: SortField): void {
+  comparisonStore.setSortField(field);
+}
+
+function handleToggleSortOrder(): void {
+  comparisonStore.toggleSortOrder();
+}
+
+function handleToggleSeverity(severity: DiffSeverity): void {
+  comparisonStore.toggleSeverityFilter(severity);
+}
+
+function handleClearSeverityFilter(): void {
+  comparisonStore.clearSeverityFilter();
+}
+
+function handleNavigateToIssue(issue: any): void {
+  comparisonStore.navigateToIssue(issue.id, issue.schemeId, issue.field, issue.category);
+  const scheme = comparisonStore.selectedSchemes.find(s => s.id === issue.schemeId);
+  if (scheme) {
+    const ok = layoutStore.loadScheme(scheme.id);
+    if (ok) {
+      message.info(`已定位到方案「${scheme.name}」的 ${issue.fieldLabel}`);
+      comparisonStore.setActiveTab('comparison');
+    }
+  }
+}
+
+const showSnapshotDialog = ref(false);
+const snapshotName = ref('');
+const snapshotDescription = ref('');
+
+function handleSaveSnapshot(): void {
+  if (comparisonStore.selectedSchemes.length === 0) {
+    message.warning('请先选择至少一套方案');
+    return;
+  }
+  snapshotName.value = `快照_${new Date().toLocaleString('zh-CN')}`;
+  snapshotDescription.value = '';
+  showSnapshotDialog.value = true;
+}
+
+function confirmSaveSnapshot(): void {
+  if (!snapshotName.value.trim()) {
+    message.warning('请输入快照名称');
+    return;
+  }
+  const result = comparisonStore.saveCurrentSnapshot(
+    snapshotName.value.trim(),
+    snapshotDescription.value.trim() || undefined
+  );
+  if (result) {
+    message.success('快照保存成功');
+    showSnapshotDialog.value = false;
+  } else {
+    message.error('快照保存失败');
+  }
+}
+
+function handleRestoreSnapshot(snapshotId: string): void {
+  dialog.warning({
+    title: '确认恢复快照',
+    content: '恢复快照将覆盖当前的选择和筛选设置，是否继续？',
+    positiveText: '确定恢复',
+    negativeText: '取消',
+    onPositiveClick: () => {
+      const ok = comparisonStore.restoreSnapshot(snapshotId);
+      if (ok) {
+        message.success('快照已恢复');
+      } else {
+        message.error('快照恢复失败');
+      }
+    },
+  });
+}
+
+function handleDeleteSnapshot(snapshotId: string): void {
+  dialog.warning({
+    title: '确认删除',
+    content: '删除后将无法恢复，是否继续？',
+    positiveText: '确定删除',
+    negativeText: '取消',
+    onPositiveClick: () => {
+      const ok = comparisonStore.deleteSnapshot(snapshotId);
+      if (ok) {
+        message.success('快照已删除');
+      }
+    },
+  });
+}
+
+function handleArchiveComparison(): void {
+  if (!comparisonStore.comparisonResult) {
+    message.warning('请先选择至少两套方案进行对比');
+    return;
+  }
+  const result = comparisonStore.archiveComparisonResult();
+  if (result) {
+    message.success('对比结果已归档');
+  }
+}
+
+function handleArchiveAudit(): void {
+  if (!comparisonStore.auditResult) {
+    message.warning('请先选择方案进行审校');
+    return;
+  }
+  const result = comparisonStore.archiveAuditResult();
+  if (result) {
+    message.success('审校报告已归档');
+  }
+}
+
+function handleDeleteArchive(recordId: string): void {
+  dialog.warning({
+    title: '确认删除',
+    content: '删除归档记录后将无法恢复，是否继续？',
+    positiveText: '确定删除',
+    negativeText: '取消',
+    onPositiveClick: () => {
+      const ok = comparisonStore.deleteArchiveRecord(recordId);
+      if (ok) {
+        message.success('归档记录已删除');
+      }
+    },
+  });
+}
+
+const showRuleDialog = ref(false);
+const editingRule = ref<CustomAuditRule | null>(null);
+const isNewRule = ref(false);
+
+const ruleForm = ref({
+  name: '',
+  description: '',
+  field: 'paperWidth' as CustomRuleField,
+  operator: 'gt' as CustomRuleOperator,
+  value: 0,
+  value2: 0,
+  severity: 'warning' as DiffSeverity,
+  category: 'paper' as DiffCategory,
+  suggestion: '',
+  enabled: true,
+});
+
+const customRuleFieldOptions = Object.entries(CUSTOM_RULE_FIELD_LABELS).map(([value, label]) => ({
+  label,
+  value,
+}));
+
+const customRuleOperatorOptions = Object.entries(CUSTOM_RULE_OPERATOR_LABELS).map(([value, label]) => ({
+  label,
+  value,
+}));
+
+const customRuleCategoryOptions = Object.entries(DIFF_CATEGORY_LABELS).map(([value, label]) => ({
+  label,
+  value,
+}));
+
+function handleAddRule(): void {
+  isNewRule.value = true;
+  editingRule.value = null;
+  ruleForm.value = {
+    name: '',
+    description: '',
+    field: 'paperWidth',
+    operator: 'gt',
+    value: 0,
+    value2: 0,
+    severity: 'warning',
+    category: 'paper',
+    suggestion: '',
+    enabled: true,
+  };
+  showRuleDialog.value = true;
+}
+
+function handleEditRule(rule: CustomAuditRule): void {
+  isNewRule.value = false;
+  editingRule.value = rule;
+  ruleForm.value = {
+    name: rule.name,
+    description: rule.description,
+    field: rule.field,
+    operator: rule.operator,
+    value: rule.value,
+    value2: rule.value2 || 0,
+    severity: rule.severity,
+    category: rule.category,
+    suggestion: rule.suggestion || '',
+    enabled: rule.enabled,
+  };
+  showRuleDialog.value = true;
+}
+
+function handleSaveRule(): void {
+  if (!ruleForm.value.name.trim()) {
+    message.warning('请输入规则名称');
+    return;
+  }
+
+  if (isNewRule.value) {
+    const result = comparisonStore.addCustomRule({
+      name: ruleForm.value.name.trim(),
+      description: ruleForm.value.description.trim(),
+      field: ruleForm.value.field,
+      operator: ruleForm.value.operator,
+      value: ruleForm.value.value,
+      value2: ruleForm.value.operator === 'between' ? ruleForm.value.value2 : undefined,
+      severity: ruleForm.value.severity,
+      category: ruleForm.value.category,
+      suggestion: ruleForm.value.suggestion.trim() || undefined,
+      enabled: ruleForm.value.enabled,
+    });
+    if (result) {
+      message.success('规则添加成功');
+      showRuleDialog.value = false;
+    } else {
+      message.error('规则添加失败');
+    }
+  } else if (editingRule.value) {
+    const ok = comparisonStore.updateCustomRule(editingRule.value.id, {
+      name: ruleForm.value.name.trim(),
+      description: ruleForm.value.description.trim(),
+      field: ruleForm.value.field,
+      operator: ruleForm.value.operator,
+      value: ruleForm.value.value,
+      value2: ruleForm.value.operator === 'between' ? ruleForm.value.value2 : undefined,
+      severity: ruleForm.value.severity,
+      category: ruleForm.value.category,
+      suggestion: ruleForm.value.suggestion.trim() || undefined,
+      enabled: ruleForm.value.enabled,
+    });
+    if (ok) {
+      message.success('规则更新成功');
+      showRuleDialog.value = false;
+    } else {
+      message.error('规则更新失败');
+    }
+  }
+}
+
+function handleDeleteRule(ruleId: string): void {
+  dialog.warning({
+    title: '确认删除',
+    content: '删除自定义规则后将无法恢复，是否继续？',
+    positiveText: '确定删除',
+    negativeText: '取消',
+    onPositiveClick: () => {
+      const ok = comparisonStore.deleteCustomRule(ruleId);
+      if (ok) {
+        message.success('规则已删除');
+      }
+    },
+  });
+}
+
+function handleToggleRule(ruleId: string): void {
+  comparisonStore.toggleCustomRule(ruleId);
+}
+
+function handleTemplateChange(templateId: ReportTemplate): void {
+  comparisonStore.setSelectedReportTemplate(templateId);
+}
+
+function isSeveritySelected(severity: DiffSeverity): boolean {
+  return comparisonStore.severityFilter.includes(severity);
+}
 </script>
 
 <template>
@@ -212,7 +523,7 @@ function formatTimestamp(ts: number): string {
     placement="right"
     @update:show="(v: boolean) => { if (!v) comparisonStore.closePanel(); }"
   >
-    <n-drawer-content title="版式对比与批量审校" :native-scrollbar="false">
+    <n-drawer-content title="版式对比审校增强版" :native-scrollbar="false">
       <template #header-extra>
         <n-button quaternary size="small" @click="handleClose">
           <template #icon>
@@ -333,11 +644,47 @@ function formatTimestamp(ts: number): string {
                   </n-button>
                 </div>
                 <div class="toolbar-right">
-                  <span class="diff-stat">
-                    差异项:
-                    <strong>{{ comparisonStore.comparisonResult?.summary.diffCount || 0 }}</strong>
-                  </span>
+                  <n-space>
+                    <span class="toolbar-label">排序:</span>
+                    <n-select
+                      :value="comparisonStore.sortConfig.field"
+                      :options="sortFieldOptions"
+                      size="small"
+                      style="width: 120px"
+                      @update:value="(v: any) => handleSortFieldChange(v)"
+                    />
+                    <n-button size="small" @click="handleToggleSortOrder">
+                      <template #icon>
+                        <component :is="comparisonStore.sortConfig.order === 'asc' ? ChevronUpOutline : ChevronDownOutline" />
+                      </template>
+                      {{ SORT_ORDER_LABELS[comparisonStore.sortConfig.order] }}
+                    </n-button>
+                  </n-space>
                 </div>
+              </div>
+
+              <div class="severity-filter-bar">
+                <span class="filter-label">严重程度:</span>
+                <n-space size="small">
+                  <n-tag
+                    v-for="opt in severityFilterOptions"
+                    :key="opt.value"
+                    :type="isSeveritySelected(opt.value) ? opt.type : 'default'"
+                    :bordered="true"
+                    class="severity-tag"
+                    @click="handleToggleSeverity(opt.value)"
+                  >
+                    {{ opt.label }}
+                  </n-tag>
+                  <n-button
+                    v-if="comparisonStore.severityFilter.length > 0"
+                    size="tiny"
+                    text
+                    @click="handleClearSeverityFilter"
+                  >
+                    清除筛选
+                  </n-button>
+                </n-space>
               </div>
 
               <div class="comparison-table-wrapper">
@@ -364,7 +711,14 @@ function formatTimestamp(ts: number): string {
                               {{ DIFF_CATEGORY_LABELS[item.category] }}
                             </n-tag>
                           </td>
-                          <td class="col-label">{{ item.label }}</td>
+                          <td class="col-label">
+                            <div class="label-with-severity">
+                              <span>{{ item.label }}</span>
+                              <n-tag size="tiny" :type="severityColors[item.severity]" class="severity-badge">
+                                {{ item.severity }}
+                              </n-tag>
+                            </div>
+                          </td>
                           <td
                             v-for="(value, idx) in item.values"
                             :key="idx"
@@ -383,6 +737,27 @@ function formatTimestamp(ts: number): string {
                     size="large"
                   />
                 </n-scrollbar>
+              </div>
+
+              <div class="tab-footer">
+                <n-space>
+                  <n-button size="small" type="primary" @click="handleSaveSnapshot">
+                    <template #icon>
+                      <save-outline />
+                    </template>
+                    保存快照
+                  </n-button>
+                  <n-button size="small" @click="handleArchiveComparison">
+                    <template #icon>
+                      <archive-outline />
+                    </template>
+                    归档对比
+                  </n-button>
+                </n-space>
+                <span class="diff-stat">
+                  差异项:
+                  <strong>{{ comparisonStore.comparisonResult?.summary.diffCount || 0 }}</strong>
+                </span>
               </div>
             </n-tab-pane>
 
@@ -489,6 +864,14 @@ function formatTimestamp(ts: number): string {
                         <span class="issue-scheme">{{ issue.schemeName }}</span>
                         <span class="issue-field">{{ issue.fieldLabel }}</span>
                         <span v-if="issue.value" class="issue-value">{{ issue.value }}</span>
+                        <div class="issue-actions">
+                          <n-button size="tiny" type="primary" quaternary @click="handleNavigateToIssue(issue)">
+                            <template #icon>
+                              <locate-outline />
+                            </template>
+                            定位
+                          </n-button>
+                        </div>
                       </div>
                       <div class="issue-message">{{ issue.message }}</div>
                       <div v-if="issue.suggestion" class="issue-suggestion">
@@ -509,6 +892,15 @@ function formatTimestamp(ts: number): string {
                   />
                 </n-scrollbar>
               </div>
+
+              <div class="tab-footer">
+                <n-button size="small" @click="handleArchiveAudit">
+                  <template #icon>
+                    <archive-outline />
+                  </template>
+                  归档审校
+                </n-button>
+              </div>
             </n-tab-pane>
 
             <n-tab-pane name="report" tab="导出报告">
@@ -518,9 +910,27 @@ function formatTimestamp(ts: number): string {
               </template>
 
               <div class="report-section">
+                <div class="section-title">报告模板</div>
+                <div class="template-list">
+                  <div
+                    v-for="template in REPORT_TEMPLATES"
+                    :key="template.id"
+                    class="template-item"
+                    :class="{ active: comparisonStore.selectedReportTemplate === template.id }"
+                    @click="handleTemplateChange(template.id)"
+                  >
+                    <div class="template-name">{{ template.name }}</div>
+                    <div class="template-desc">{{ template.description }}</div>
+                  </div>
+                </div>
+              </div>
+
+              <n-divider />
+
+              <div class="report-section">
                 <div class="section-title">审校报告导出</div>
                 <p class="section-desc">
-                  导出包含参数差异、审校问题、方案详情的完整审校报告
+                  使用「{{ comparisonStore.currentReportTemplate.name }}」导出包含参数差异、审校问题的报告
                 </p>
                 <n-space>
                   <n-button type="primary" @click="handleExportReport('json')">
@@ -567,14 +977,322 @@ function formatTimestamp(ts: number): string {
                   </n-button>
                 </n-dropdown>
                 <p v-if="comparisonStore.selectedSchemes.length > 0" class="export-hint">
-                  将导出 {{ comparisonStore.selectedSchemes.length }} 套方案
+                  将导出 {{ comparisonStore.selectedSchemes.length }} 套方案，导出记录自动归档
                 </p>
+              </div>
+            </n-tab-pane>
+
+            <n-tab-pane name="snapshot" tab="对比快照">
+              <template #tab>
+                <save-outline class="tab-icon" />
+                对比快照
+              </template>
+
+              <div class="snapshot-section">
+                <div class="section-header">
+                  <div class="section-title">快照管理</div>
+                  <n-button size="small" type="primary" @click="handleSaveSnapshot">
+                    <template #icon>
+                      <add-outline />
+                    </template>
+                    保存当前状态
+                  </n-button>
+                </div>
+                <p class="section-desc">
+                  保存当前的方案选择、筛选条件和排序设置，方便日后快速恢复
+                </p>
+
+                <div v-if="comparisonStore.snapshots.length > 0" class="snapshot-list">
+                  <n-scrollbar>
+                    <n-list hoverable>
+                      <n-list-item
+                        v-for="snapshot in comparisonStore.snapshots"
+                        :key="snapshot.id"
+                        class="snapshot-item"
+                      >
+                        <div class="snapshot-info">
+                          <div class="snapshot-name">{{ snapshot.name }}</div>
+                          <div class="snapshot-meta">
+                            <span>{{ formatTimestamp(snapshot.createdAt) }}</span>
+                            <span class="snapshot-schemes">
+                              {{ snapshot.selectedSchemeIds.length }} 套方案
+                            </span>
+                          </div>
+                          <div v-if="snapshot.description" class="snapshot-desc">
+                            {{ snapshot.description }}
+                          </div>
+                        </div>
+                        <div class="snapshot-actions">
+                          <n-button size="tiny" type="primary" quaternary @click="handleRestoreSnapshot(snapshot.id)">
+                            <template #icon>
+                              <arrow-undo-outline />
+                            </template>
+                            恢复
+                          </n-button>
+                          <n-button size="tiny" type="error" quaternary @click="handleDeleteSnapshot(snapshot.id)">
+                            <template #icon>
+                              <trash-outline />
+                            </template>
+                            删除
+                          </n-button>
+                        </div>
+                      </n-list-item>
+                    </n-list>
+                  </n-scrollbar>
+                </div>
+                <n-empty v-else description="暂无快照，保存当前对比状态以创建快照" />
+              </div>
+            </n-tab-pane>
+
+            <n-tab-pane name="archive" tab="统一归档">
+              <template #tab>
+                <archive-outline class="tab-icon" />
+                统一归档
+              </template>
+
+              <div class="archive-section">
+                <div class="section-header">
+                  <div class="section-title">归档记录</div>
+                </div>
+
+                <div class="archive-stats">
+                  <n-grid :cols="5" :x-gap="8" :y-gap="8">
+                    <n-grid-item>
+                      <n-statistic label="总记录" :value="comparisonStore.archiveStats.totalRecords" />
+                    </n-grid-item>
+                    <n-grid-item>
+                      <n-statistic label="对比结果" :value="comparisonStore.archiveStats.comparisonCount" />
+                    </n-grid-item>
+                    <n-grid-item>
+                      <n-statistic label="审校报告" :value="comparisonStore.archiveStats.auditCount" />
+                    </n-grid-item>
+                    <n-grid-item>
+                      <n-statistic label="导出记录" :value="comparisonStore.archiveStats.exportCount" />
+                    </n-grid-item>
+                    <n-grid-item>
+                      <n-statistic label="涉及方案" :value="comparisonStore.archiveStats.totalSchemes" />
+                    </n-grid-item>
+                  </n-grid>
+                </div>
+
+                <div v-if="comparisonStore.archiveRecords.length > 0" class="archive-list">
+                  <n-scrollbar>
+                    <n-list hoverable>
+                      <n-list-item
+                        v-for="record in comparisonStore.archiveRecords"
+                        :key="record.id"
+                        class="archive-item"
+                      >
+                        <div class="archive-info">
+                          <div class="archive-header">
+                            <n-tag size="small" type="info">
+                              {{ ARCHIVE_TYPE_LABELS[record.type] }}
+                            </n-tag>
+                            <span class="archive-name">{{ record.name }}</span>
+                          </div>
+                          <div class="archive-meta">
+                            <span>{{ formatTimestamp(record.createdAt) }}</span>
+                            <span class="archive-schemes">
+                              {{ record.schemeCount }} 套方案
+                            </span>
+                          </div>
+                          <div v-if="record.description" class="archive-desc">
+                            {{ record.description }}
+                          </div>
+                          <div v-if="record.schemeNames && record.schemeNames.length > 0" class="archive-scheme-names">
+                            <n-tag
+                              v-for="name in record.schemeNames.slice(0, 3)"
+                              :key="name"
+                              size="tiny"
+                              type="default"
+                            >
+                              {{ name }}
+                            </n-tag>
+                            <n-tag v-if="record.schemeNames.length > 3" size="tiny">
+                              +{{ record.schemeNames.length - 3 }}
+                            </n-tag>
+                          </div>
+                        </div>
+                        <div class="archive-actions">
+                          <n-button size="tiny" type="error" quaternary @click="handleDeleteArchive(record.id)">
+                            <template #icon>
+                              <trash-outline />
+                            </template>
+                            删除
+                          </n-button>
+                        </div>
+                      </n-list-item>
+                    </n-list>
+                  </n-scrollbar>
+                </div>
+                <n-empty v-else description="暂无归档记录，对比结果和导出记录将自动归档" />
+              </div>
+            </n-tab-pane>
+
+            <n-tab-pane name="rules" tab="审校规则">
+              <template #tab>
+                <settings-outline class="tab-icon" />
+                自定义规则
+              </template>
+
+              <div class="rules-section">
+                <div class="section-header">
+                  <div class="section-title">自定义审校规则</div>
+                  <n-button size="small" type="primary" @click="handleAddRule">
+                    <template #icon>
+                      <add-outline />
+                    </template>
+                    添加规则
+                  </n-button>
+                </div>
+                <p class="section-desc">
+                  定义自己的审校规则，系统将根据规则自动检查方案参数
+                </p>
+
+                <div v-if="comparisonStore.customRules.length > 0" class="rules-list">
+                  <n-scrollbar>
+                    <n-list hoverable>
+                      <n-list-item
+                        v-for="rule in comparisonStore.customRules"
+                        :key="rule.id"
+                        class="rule-item"
+                        :class="{ disabled: !rule.enabled }"
+                      >
+                        <div class="rule-header">
+                          <n-switch
+                            :value="rule.enabled"
+                            size="small"
+                            @update:value="() => handleToggleRule(rule.id)"
+                          />
+                          <span class="rule-name">{{ rule.name }}</span>
+                          <n-tag size="small" :type="severityColors[rule.severity]">
+                            {{ rule.severity }}
+                          </n-tag>
+                        </div>
+                        <div class="rule-desc">
+                          {{ CUSTOM_RULE_FIELD_LABELS[rule.field] }}
+                          {{ CUSTOM_RULE_OPERATOR_LABELS[rule.operator] }}
+                          {{ rule.operator === 'between' && rule.value2 !== undefined 
+                            ? `${rule.value} ~ ${rule.value2}` 
+                            : rule.value }}
+                        </div>
+                        <div v-if="rule.description" class="rule-note">
+                          {{ rule.description }}
+                        </div>
+                        <div class="rule-actions">
+                          <n-button size="tiny" quaternary @click="handleEditRule(rule)">
+                            <template #icon>
+                              <settings-outline />
+                            </template>
+                            编辑
+                          </n-button>
+                          <n-button size="tiny" type="error" quaternary @click="handleDeleteRule(rule.id)">
+                            <template #icon>
+                              <trash-outline />
+                            </template>
+                            删除
+                          </n-button>
+                        </div>
+                      </n-list-item>
+                    </n-list>
+                  </n-scrollbar>
+                </div>
+                <n-empty v-else description="暂无自定义规则，点击添加创建您的第一条规则" />
               </div>
             </n-tab-pane>
           </n-tabs>
         </div>
       </div>
     </n-drawer-content>
+
+    <n-modal
+      v-model:show="showSnapshotDialog"
+      preset="dialog"
+      title="保存快照"
+      positive-text="保存"
+      negative-text="取消"
+      @positive-click="confirmSaveSnapshot"
+    >
+      <n-form>
+        <n-form-item label="快照名称" required>
+          <n-input v-model:value="snapshotName" placeholder="请输入快照名称" />
+        </n-form-item>
+        <n-form-item label="描述">
+          <n-input
+            v-model:value="snapshotDescription"
+            type="textarea"
+            placeholder="可选：添加快照描述"
+            :autosize="{ minRows: 2, maxRows: 4 }"
+          />
+        </n-form-item>
+      </n-form>
+    </n-modal>
+
+    <n-modal
+      v-model:show="showRuleDialog"
+      preset="dialog"
+      :title="isNewRule ? '添加规则' : '编辑规则'"
+      positive-text="保存"
+      negative-text="取消"
+      @positive-click="handleSaveRule"
+      style="width: 500px"
+    >
+      <n-form>
+        <n-form-item label="规则名称" required>
+          <n-input v-model:value="ruleForm.name" placeholder="请输入规则名称" />
+        </n-form-item>
+        <n-form-item label="规则描述">
+          <n-input
+            v-model:value="ruleForm.description"
+            type="textarea"
+            placeholder="可选：添加规则描述"
+            :autosize="{ minRows: 2, maxRows: 3 }"
+          />
+        </n-form-item>
+        <n-form-item label="检查字段" required>
+          <n-select
+            v-model:value="ruleForm.field"
+            :options="customRuleFieldOptions"
+          />
+        </n-form-item>
+        <n-form-item label="比较条件" required>
+          <n-select
+            v-model:value="ruleForm.operator"
+            :options="customRuleOperatorOptions"
+          />
+        </n-form-item>
+        <n-form-item label="阈值" required>
+          <n-input-number v-model:value="ruleForm.value" style="width: 100%" />
+        </n-form-item>
+        <n-form-item v-if="ruleForm.operator === 'between'" label="上限值" required>
+          <n-input-number v-model:value="ruleForm.value2" style="width: 100%" />
+        </n-form-item>
+        <n-form-item label="严重程度" required>
+          <n-radio-group v-model:value="ruleForm.severity">
+            <n-radio value="error">错误</n-radio>
+            <n-radio value="warning">警告</n-radio>
+            <n-radio value="info">提示</n-radio>
+          </n-radio-group>
+        </n-form-item>
+        <n-form-item label="所属分类" required>
+          <n-select
+            v-model:value="ruleForm.category"
+            :options="customRuleCategoryOptions"
+          />
+        </n-form-item>
+        <n-form-item label="改进建议">
+          <n-input
+            v-model:value="ruleForm.suggestion"
+            type="textarea"
+            placeholder="可选：添加改进建议"
+            :autosize="{ minRows: 2, maxRows: 3 }"
+          />
+        </n-form-item>
+        <n-form-item label="启用状态">
+          <n-switch v-model:value="ruleForm.enabled" />
+        </n-form-item>
+      </n-form>
+    </n-modal>
   </n-drawer>
 </template>
 
@@ -702,6 +1420,34 @@ function formatTimestamp(ts: number): string {
   align-items: center;
 }
 
+.toolbar-label {
+  font-size: 13px;
+  color: #8B7355;
+}
+
+.severity-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #E8DFCC;
+  margin-bottom: 12px;
+}
+
+.filter-label {
+  font-size: 13px;
+  color: #8B7355;
+}
+
+.severity-tag {
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.severity-tag:hover {
+  opacity: 0.8;
+}
+
 .diff-stat {
   font-size: 13px;
   color: #8B7355;
@@ -766,6 +1512,19 @@ function formatTimestamp(ts: number): string {
   color: #3D2914 !important;
 }
 
+.label-with-severity {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.severity-badge {
+  font-size: 10px;
+  height: 16px;
+  line-height: 16px;
+  padding: 0 4px;
+}
+
 .col-value {
   min-width: 140px;
   font-family: 'Source Code Pro', monospace;
@@ -774,6 +1533,16 @@ function formatTimestamp(ts: number): string {
 .diff-cell .value-text {
   color: #D48806;
   font-weight: 500;
+}
+
+.tab-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-top: 12px;
+  border-top: 1px solid #E8DFCC;
+  margin-top: 12px;
+  flex-shrink: 0;
 }
 
 .audit-summary {
@@ -868,6 +1637,10 @@ function formatTimestamp(ts: number): string {
   border-radius: 3px;
 }
 
+.issue-actions {
+  margin-left: auto;
+}
+
 .issue-message {
   color: #5D4037;
   font-size: 13px;
@@ -913,6 +1686,13 @@ function formatTimestamp(ts: number): string {
   padding: 16px 0;
 }
 
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
 .section-title {
   font-size: 15px;
   font-weight: 600;
@@ -930,5 +1710,158 @@ function formatTimestamp(ts: number): string {
   margin-top: 10px;
   font-size: 12px;
   color: #8B7355;
+}
+
+.template-list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.template-item {
+  padding: 12px;
+  border: 2px solid #E8DFCC;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: #FAF5EB;
+}
+
+.template-item:hover {
+  border-color: #D4C4A8;
+  background: #F5EFE0;
+}
+
+.template-item.active {
+  border-color: #C41E3A;
+  background: rgba(196, 30, 58, 0.05);
+}
+
+.template-name {
+  font-weight: 600;
+  color: #3D2914;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.template-desc {
+  font-size: 12px;
+  color: #8B7355;
+  line-height: 1.4;
+}
+
+.snapshot-section,
+.archive-section,
+.rules-section {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.snapshot-list,
+.archive-list,
+.rules-list {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.snapshot-item,
+.archive-item,
+.rule-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 12px !important;
+  border-bottom: 1px solid #E8DFCC;
+}
+
+.snapshot-info,
+.archive-info,
+.rule-item > div:not(.rule-actions) {
+  flex: 1;
+  min-width: 0;
+}
+
+.snapshot-name,
+.archive-name,
+.rule-name {
+  font-weight: 600;
+  color: #3D2914;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.snapshot-meta,
+.archive-meta,
+.rule-desc {
+  font-size: 12px;
+  color: #8B7355;
+  display: flex;
+  gap: 12px;
+  margin-bottom: 4px;
+}
+
+.snapshot-schemes,
+.archive-schemes {
+  color: #C41E3A;
+}
+
+.snapshot-desc,
+.archive-desc,
+.rule-note {
+  font-size: 12px;
+  color: #8B7355;
+  margin-bottom: 6px;
+}
+
+.archive-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.archive-scheme-names {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.snapshot-actions,
+.archive-actions,
+.rule-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.archive-stats {
+  margin-bottom: 16px;
+  padding: 12px;
+  background: #FAF5EB;
+  border-radius: 8px;
+  border: 1px solid #E8DFCC;
+}
+
+.rule-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.rule-item.disabled {
+  opacity: 0.5;
+}
+
+:deep(.n-statistic-label) {
+  font-size: 12px !important;
+}
+
+:deep(.n-statistic-value) {
+  font-size: 20px !important;
 }
 </style>

@@ -11,10 +11,26 @@ import type {
   AuditResult,
   AuditSummary,
   ReportExportOptions,
+  SortConfig,
+  CustomAuditRule,
+  ComparisonSnapshot,
+  ArchiveRecord,
+  ArchiveStats,
+  ArchiveItemType,
+  ReportTemplateConfig,
 } from '../types/comparison';
 import {
   DIFF_CATEGORY_LABELS,
   AUDIT_ISSUE_TYPE_LABELS,
+  SEVERITY_ORDER,
+  SNAPSHOT_STORAGE_KEY,
+  ARCHIVE_STORAGE_KEY,
+  CUSTOM_RULES_STORAGE_KEY,
+  MAX_SNAPSHOTS,
+  MAX_ARCHIVE_RECORDS,
+  MAX_CUSTOM_RULES,
+  CUSTOM_RULE_FIELD_LABELS,
+  CUSTOM_RULE_OPERATOR_LABELS,
 } from '../types/comparison';
 import { calculateLayoutStats, formatArea, formatRatio } from './calculation';
 import { validateLayoutParams } from './validation';
@@ -921,4 +937,643 @@ export async function batchExportSchemes(
       }, i * 500);
     });
   }
+}
+
+export function sortDiffItems(items: DiffItem[], config: SortConfig): DiffItem[] {
+  const sorted = [...items];
+  sorted.sort((a, b) => {
+    let comparison = 0;
+    switch (config.field) {
+      case 'label':
+        comparison = a.label.localeCompare(b.label, 'zh-CN');
+        break;
+      case 'category':
+        comparison = DIFF_CATEGORY_LABELS[a.category].localeCompare(DIFF_CATEGORY_LABELS[b.category], 'zh-CN');
+        break;
+      case 'severity':
+        comparison = SEVERITY_ORDER[b.severity] - SEVERITY_ORDER[a.severity];
+        break;
+      case 'hasDiff':
+        comparison = (b.hasDiff ? 1 : 0) - (a.hasDiff ? 1 : 0);
+        break;
+    }
+    return config.order === 'asc' ? comparison : -comparison;
+  });
+  return sorted;
+}
+
+export function filterDiffItemsBySeverity(
+  items: DiffItem[],
+  severities: DiffSeverity[]
+): DiffItem[] {
+  if (severities.length === 0) return items;
+  return items.filter(item => severities.includes(item.severity));
+}
+
+export function applyCustomRules(
+  scheme: SavedScheme,
+  rules: CustomAuditRule[]
+): AuditIssue[] {
+  const issues: AuditIssue[] = [];
+  const stats = calculateLayoutStats(scheme.params);
+
+  for (const rule of rules) {
+    if (!rule.enabled) continue;
+
+    let fieldValue: number | undefined;
+
+    const paramValue = (scheme.params as Record<string, any>)[rule.field];
+    if (paramValue !== undefined && typeof paramValue === 'number') {
+      fieldValue = paramValue;
+    } else {
+      const statValue = (stats as Record<string, any>)[rule.field];
+      if (statValue !== undefined && typeof statValue === 'number') {
+        fieldValue = statValue;
+      }
+    }
+
+    if (fieldValue === undefined) continue;
+
+    let matched = false;
+    switch (rule.operator) {
+      case 'gt':
+        matched = fieldValue > rule.value;
+        break;
+      case 'lt':
+        matched = fieldValue < rule.value;
+        break;
+      case 'eq':
+        matched = Math.abs(fieldValue - rule.value) < 0.001;
+        break;
+      case 'neq':
+        matched = Math.abs(fieldValue - rule.value) >= 0.001;
+        break;
+      case 'gte':
+        matched = fieldValue >= rule.value;
+        break;
+      case 'lte':
+        matched = fieldValue <= rule.value;
+        break;
+      case 'between':
+        if (rule.value2 !== undefined) {
+          matched = fieldValue >= rule.value && fieldValue <= rule.value2;
+        }
+        break;
+    }
+
+    if (matched) {
+      const fieldLabel = CUSTOM_RULE_FIELD_LABELS[rule.field] || rule.field;
+      const operatorLabel = CUSTOM_RULE_OPERATOR_LABELS[rule.operator] || rule.operator;
+      const valueText = rule.operator === 'between' && rule.value2 !== undefined
+        ? `${rule.value} ~ ${rule.value2}`
+        : String(rule.value);
+
+      issues.push({
+        id: `custom_${rule.id}_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        type: 'best_practice',
+        severity: rule.severity,
+        schemeId: scheme.id,
+        schemeName: scheme.name,
+        category: rule.category,
+        field: rule.field,
+        fieldLabel,
+        value: String(fieldValue),
+        message: `自定义规则「${rule.name}」：${fieldLabel}(${fieldValue}) ${operatorLabel} ${valueText}`,
+        suggestion: rule.suggestion,
+      });
+    }
+  }
+
+  return issues;
+}
+
+export function loadCustomRules(): CustomAuditRule[] {
+  try {
+    const saved = localStorage.getItem(CUSTOM_RULES_STORAGE_KEY);
+    if (!saved) return [];
+    const rules = JSON.parse(saved) as CustomAuditRule[];
+    return Array.isArray(rules) ? rules : [];
+  } catch (e) {
+    console.warn('加载自定义审校规则失败:', e);
+    return [];
+  }
+}
+
+export function saveCustomRules(rules: CustomAuditRule[]): void {
+  try {
+    localStorage.setItem(CUSTOM_RULES_STORAGE_KEY, JSON.stringify(rules));
+  } catch (e) {
+    console.warn('保存自定义审校规则失败:', e);
+  }
+}
+
+export function createCustomRule(
+  rule: Omit<CustomAuditRule, 'id'>
+): CustomAuditRule {
+  return {
+    ...rule,
+    id: `rule_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+  };
+}
+
+export function addCustomRule(rule: Omit<CustomAuditRule, 'id'>): CustomAuditRule | null {
+  const rules = loadCustomRules();
+  if (rules.length >= MAX_CUSTOM_RULES) {
+    console.warn(`自定义规则数量已达上限 (${MAX_CUSTOM_RULES})`);
+    return null;
+  }
+  const newRule = createCustomRule(rule);
+  rules.push(newRule);
+  saveCustomRules(rules);
+  return newRule;
+}
+
+export function updateCustomRule(id: string, updates: Partial<CustomAuditRule>): boolean {
+  const rules = loadCustomRules();
+  const index = rules.findIndex(r => r.id === id);
+  if (index === -1) return false;
+  rules[index] = { ...rules[index], ...updates };
+  saveCustomRules(rules);
+  return true;
+}
+
+export function deleteCustomRule(id: string): boolean {
+  const rules = loadCustomRules();
+  const filtered = rules.filter(r => r.id !== id);
+  if (filtered.length === rules.length) return false;
+  saveCustomRules(filtered);
+  return true;
+}
+
+export function loadSnapshots(): ComparisonSnapshot[] {
+  try {
+    const saved = localStorage.getItem(SNAPSHOT_STORAGE_KEY);
+    if (!saved) return [];
+    const snapshots = JSON.parse(saved) as ComparisonSnapshot[];
+    return Array.isArray(snapshots) ? snapshots : [];
+  } catch (e) {
+    console.warn('加载对比快照失败:', e);
+    return [];
+  }
+}
+
+export function saveSnapshots(snapshots: ComparisonSnapshot[]): void {
+  try {
+    localStorage.setItem(SNAPSHOT_STORAGE_KEY, JSON.stringify(snapshots));
+  } catch (e) {
+    console.warn('保存对比快照失败:', e);
+  }
+}
+
+export function createSnapshot(
+  data: Omit<ComparisonSnapshot, 'id' | 'createdAt'>
+): ComparisonSnapshot {
+  return {
+    ...data,
+    id: `snap_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    createdAt: Date.now(),
+  };
+}
+
+export function addSnapshot(
+  data: Omit<ComparisonSnapshot, 'id' | 'createdAt'>
+): ComparisonSnapshot | null {
+  const snapshots = loadSnapshots();
+  if (snapshots.length >= MAX_SNAPSHOTS) {
+    snapshots.pop();
+  }
+  const snapshot = createSnapshot(data);
+  snapshots.unshift(snapshot);
+  saveSnapshots(snapshots);
+  return snapshot;
+}
+
+export function deleteSnapshot(id: string): boolean {
+  const snapshots = loadSnapshots();
+  const filtered = snapshots.filter(s => s.id !== id);
+  if (filtered.length === snapshots.length) return false;
+  saveSnapshots(filtered);
+  return true;
+}
+
+export function updateSnapshot(id: string, updates: Partial<ComparisonSnapshot>): boolean {
+  const snapshots = loadSnapshots();
+  const index = snapshots.findIndex(s => s.id === id);
+  if (index === -1) return false;
+  snapshots[index] = { ...snapshots[index], ...updates };
+  saveSnapshots(snapshots);
+  return true;
+}
+
+export function loadArchiveRecords(): ArchiveRecord[] {
+  try {
+    const saved = localStorage.getItem(ARCHIVE_STORAGE_KEY);
+    if (!saved) return [];
+    const records = JSON.parse(saved) as ArchiveRecord[];
+    return Array.isArray(records) ? records : [];
+  } catch (e) {
+    console.warn('加载归档记录失败:', e);
+    return [];
+  }
+}
+
+export function saveArchiveRecords(records: ArchiveRecord[]): void {
+  try {
+    localStorage.setItem(ARCHIVE_STORAGE_KEY, JSON.stringify(records));
+  } catch (e) {
+    console.warn('保存归档记录失败:', e);
+  }
+}
+
+export function createArchiveRecord(
+  data: Omit<ArchiveRecord, 'id' | 'createdAt'>
+): ArchiveRecord {
+  return {
+    ...data,
+    id: `arch_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    createdAt: Date.now(),
+  };
+}
+
+export function addArchiveRecord(
+  data: Omit<ArchiveRecord, 'id' | 'createdAt'>
+): ArchiveRecord | null {
+  const records = loadArchiveRecords();
+  if (records.length >= MAX_ARCHIVE_RECORDS) {
+    records.pop();
+  }
+  const record = createArchiveRecord(data);
+  records.unshift(record);
+  saveArchiveRecords(records);
+  return record;
+}
+
+export function deleteArchiveRecord(id: string): boolean {
+  const records = loadArchiveRecords();
+  const filtered = records.filter(r => r.id !== id);
+  if (filtered.length === records.length) return false;
+  saveArchiveRecords(filtered);
+  return true;
+}
+
+export function getArchiveStats(): ArchiveStats {
+  const records = loadArchiveRecords();
+  const stats: ArchiveStats = {
+    totalRecords: records.length,
+    comparisonCount: 0,
+    auditCount: 0,
+    exportCount: 0,
+    snapshotCount: 0,
+    totalSchemes: 0,
+  };
+
+  const schemeSet = new Set<string>();
+  for (const record of records) {
+    switch (record.type) {
+      case 'comparison':
+        stats.comparisonCount++;
+        break;
+      case 'audit':
+        stats.auditCount++;
+        break;
+      case 'export':
+        stats.exportCount++;
+        break;
+      case 'snapshot':
+        stats.snapshotCount++;
+        break;
+    }
+    record.schemeNames.forEach(name => schemeSet.add(name));
+  }
+  stats.totalSchemes = schemeSet.size;
+
+  return stats;
+}
+
+export function generateReportWithTemplate(
+  schemes: SavedScheme[],
+  comparison: ComparisonResult,
+  audit: AuditResult,
+  template: ReportTemplateConfig,
+  format: 'json' | 'csv' | 'txt'
+): string {
+  switch (format) {
+    case 'json':
+      return generateReportJsonWithTemplate(schemes, comparison, audit, template);
+    case 'csv':
+      return generateReportCsvWithTemplate(schemes, comparison, audit, template);
+    case 'txt':
+    default:
+      return generateReportTxtWithTemplate(schemes, comparison, audit, template);
+  }
+}
+
+function generateReportJsonWithTemplate(
+  schemes: SavedScheme[],
+  comparison: ComparisonResult,
+  audit: AuditResult,
+  template: ReportTemplateConfig
+): string {
+  const report: Record<string, any> = {
+    title: '版式对比与审校报告',
+    template: template.name,
+    generatedAt: new Date().toISOString(),
+    generatedAtLocal: new Date().toLocaleString('zh-CN'),
+    schemeCount: schemes.length,
+  };
+
+  if (template.includeSummary) {
+    report.summary = {
+      comparison: comparison.summary,
+      audit: audit.summary,
+    };
+  }
+
+  if (template.includeConclusions) {
+    report.conclusions = audit.conclusions;
+  }
+
+  if (template.includeDiffItems && template.includeDetails) {
+    report.differences = comparison.diffItems.filter(d => d.hasDiff).map(d => ({
+      key: d.key,
+      label: d.label,
+      category: DIFF_CATEGORY_LABELS[d.category] || d.category,
+      values: d.values,
+      severity: d.severity,
+    }));
+  }
+
+  if (template.includeIssues && template.includeDetails) {
+    report.issues = audit.issues.map(i => ({
+      type: AUDIT_ISSUE_TYPE_LABELS[i.type] || i.type,
+      severity: i.severity,
+      scheme: i.schemeName,
+      category: DIFF_CATEGORY_LABELS[i.category] || i.category,
+      field: i.fieldLabel,
+      value: i.value,
+      message: i.message,
+      suggestion: i.suggestion,
+    }));
+  }
+
+  if (template.includeSchemes) {
+    report.schemes = schemes.map(s => ({
+      id: s.id,
+      name: s.name,
+      createdAt: new Date(s.createdAt).toLocaleString('zh-CN'),
+      updatedAt: new Date(s.updatedAt).toLocaleString('zh-CN'),
+      params: s.params,
+    }));
+  }
+
+  return JSON.stringify(report, null, 2);
+}
+
+function generateReportCsvWithTemplate(
+  schemes: SavedScheme[],
+  comparison: ComparisonResult,
+  audit: AuditResult,
+  template: ReportTemplateConfig
+): string {
+  const lines: string[] = [];
+
+  lines.push(`报告模板: ${template.name}`);
+  lines.push(`生成时间: ${new Date().toLocaleString('zh-CN')}`);
+  lines.push('');
+
+  if (template.includeSchemes) {
+    lines.push('【方案详情】');
+    const schemeHeaders = [
+      '序号', '方案名称', '创建时间', '更新时间',
+      '纸张宽度(mm)', '纸张高度(mm)',
+      '上边距(mm)', '下边距(mm)', '左边距(mm)', '右边距(mm)',
+      '栏数', '行数',
+      '栏线粗细(mm)', '栏线颜色',
+      '鱼尾样式',
+      '批注区位置', '批注区宽度(mm)',
+    ];
+    lines.push(schemeHeaders.join(','));
+
+    for (let i = 0; i < schemes.length; i++) {
+      const s = schemes[i];
+      const line = [
+        String(i + 1),
+        `"${s.name.replace(/"/g, '""')}"`,
+        `"${new Date(s.createdAt).toLocaleString('zh-CN')}"`,
+        `"${new Date(s.updatedAt).toLocaleString('zh-CN')}"`,
+        String(s.params.paperWidth),
+        String(s.params.paperHeight),
+        String(s.params.marginTop),
+        String(s.params.marginBottom),
+        String(s.params.marginLeft),
+        String(s.params.marginRight),
+        String(s.params.columnCount),
+        String(s.params.rowCount),
+        String(s.params.lineThickness),
+        s.params.lineColor,
+        `"${fishtailLabelMap[s.params.fishtailStyle] || s.params.fishtailStyle}"`,
+        `"${annotationPositionLabelMap[s.params.annotationPosition] || s.params.annotationPosition}"`,
+        String(s.params.annotationWidth),
+      ];
+      lines.push(line.join(','));
+    }
+    lines.push('');
+  }
+
+  if (template.includeDiffItems && template.includeDetails) {
+    lines.push('【参数对比差异】');
+    const diffHeaders = ['分类', '参数项', ...comparison.schemes.map(s => s.schemeName.replace(/"/g, '""'))];
+    lines.push(diffHeaders.map(h => `"${h}"`).join(','));
+
+    for (const item of comparison.diffItems) {
+      if (item.hasDiff) {
+        const line = [
+          `"${DIFF_CATEGORY_LABELS[item.category]}"`,
+          `"${item.label}"`,
+          ...item.values.map(v => `"${v.replace(/"/g, '""')}"`),
+        ];
+        lines.push(line.join(','));
+      }
+    }
+    lines.push('');
+  }
+
+  if (template.includeIssues && template.includeDetails) {
+    lines.push('【审校问题】');
+    const auditHeaders = ['方案名称', '问题类型', '严重程度', '分类', '字段', '值', '问题描述', '建议'];
+    lines.push(auditHeaders.join(','));
+
+    for (const issue of audit.issues) {
+      const line = [
+        `"${issue.schemeName.replace(/"/g, '""')}"`,
+        `"${AUDIT_ISSUE_TYPE_LABELS[issue.type] || issue.type}"`,
+        `"${issue.severity}"`,
+        `"${DIFF_CATEGORY_LABELS[issue.category] || issue.category}"`,
+        `"${issue.fieldLabel}"`,
+        `"${issue.value}"`,
+        `"${issue.message.replace(/"/g, '""')}"`,
+        `"${(issue.suggestion || '').replace(/"/g, '""')}"`,
+      ].join(',');
+      lines.push(line);
+    }
+    lines.push('');
+  }
+
+  if (template.includeConclusions) {
+    lines.push('【审校结论】');
+    for (const conclusion of audit.conclusions) {
+      lines.push(`"${conclusion.replace(/"/g, '""')}"`);
+    }
+  }
+
+  return '\uFEFF' + lines.join('\n');
+}
+
+function generateReportTxtWithTemplate(
+  schemes: SavedScheme[],
+  comparison: ComparisonResult,
+  audit: AuditResult,
+  template: ReportTemplateConfig
+): string {
+  const lines: string[] = [];
+
+  lines.push('='.repeat(60));
+  lines.push('古籍朱丝栏版式 - 对比与审校报告');
+  lines.push(`模板: ${template.name}`);
+  lines.push('='.repeat(60));
+  lines.push(`生成时间: ${new Date().toLocaleString('zh-CN')}`);
+  lines.push(`方案数量: ${schemes.length} 套`);
+  lines.push('');
+
+  if (template.includeSummary) {
+    lines.push('【审校统计】');
+    lines.push('-'.repeat(40));
+    lines.push(`  方案总数: ${audit.summary.totalSchemes}`);
+    lines.push(`  问题总数: ${audit.summary.totalIssues}`);
+    lines.push(`  错误数: ${audit.summary.errorCount}`);
+    lines.push(`  警告数: ${audit.summary.warningCount}`);
+    lines.push(`  提示数: ${audit.summary.infoCount}`);
+    lines.push(`  通过数: ${audit.summary.passCount}/${audit.summary.totalSchemes}`);
+    lines.push('');
+
+    lines.push('【对比统计】');
+    lines.push('-'.repeat(40));
+    lines.push(`  差异项: ${comparison.summary.diffCount}`);
+    lines.push(`  相同项: ${comparison.summary.identicalCount}`);
+    lines.push('');
+  }
+
+  if (template.includeConclusions) {
+    lines.push('【审校结论】');
+    lines.push('-'.repeat(40));
+    for (const conclusion of audit.conclusions) {
+      lines.push(`  • ${conclusion}`);
+    }
+    lines.push('');
+  }
+
+  if (template.includeSchemes) {
+    lines.push('【方案列表】');
+    lines.push('-'.repeat(40));
+    for (let i = 0; i < schemes.length; i++) {
+      const s = schemes[i];
+      lines.push(`  ${i + 1}. ${s.name}`);
+      lines.push(
+        `     纸张: ${s.params.paperWidth}×${s.params.paperHeight}mm | 版心: ${comparison.schemes[i].stats.printWidth.toFixed(
+          1
+        )}×${comparison.schemes[i].stats.printHeight.toFixed(1)}mm`
+      );
+      lines.push(
+        `     栏行: ${s.params.columnCount}栏×${s.params.rowCount}行 | 鱼尾: ${
+          fishtailLabelMap[s.params.fishtailStyle] || s.params.fishtailStyle
+        }`
+      );
+      lines.push('');
+    }
+  }
+
+  if (template.includeDiffItems && template.includeDetails) {
+    lines.push('【差异详情】');
+    lines.push('-'.repeat(40));
+    const diffItems = comparison.diffItems.filter(d => d.hasDiff);
+    if (diffItems.length === 0) {
+      lines.push('  所有方案参数完全一致');
+    } else {
+      for (const item of diffItems) {
+        lines.push(`  [${DIFF_CATEGORY_LABELS[item.category]}] ${item.label}:`);
+        for (let i = 0; i < item.values.length; i++) {
+          lines.push(`    ${comparison.schemes[i].schemeName}: ${item.values[i]}`);
+        }
+        lines.push('');
+      }
+    }
+    lines.push('');
+  }
+
+  if (template.includeIssues && template.includeDetails) {
+    lines.push('【审校问题详情】');
+    lines.push('-'.repeat(40));
+    if (audit.issues.length === 0) {
+      lines.push('  未发现问题');
+    } else {
+      const groupedByScheme: Record<string, AuditIssue[]> = {};
+      for (const issue of audit.issues) {
+        if (!groupedByScheme[issue.schemeId]) {
+          groupedByScheme[issue.schemeId] = [];
+        }
+        groupedByScheme[issue.schemeId].push(issue);
+      }
+
+      for (const schemeId of Object.keys(groupedByScheme)) {
+        const schemeIssues = groupedByScheme[schemeId];
+        const schemeName = schemeIssues[0].schemeName;
+        lines.push(`\n  方案: ${schemeName}`);
+        for (const issue of schemeIssues) {
+          const severityIcon = issue.severity === 'error' ? '✗' : issue.severity === 'warning' ? '!' : 'ℹ';
+          lines.push(`    [${severityIcon}] ${issue.message}`);
+          if (issue.suggestion) {
+            lines.push(`       建议: ${issue.suggestion}`);
+          }
+        }
+      }
+    }
+  }
+
+  lines.push('');
+  lines.push('='.repeat(60));
+  lines.push('报告结束');
+  lines.push('='.repeat(60));
+
+  return lines.join('\n');
+}
+
+export function exportReportWithTemplate(
+  schemes: SavedScheme[],
+  comparison: ComparisonResult,
+  audit: AuditResult,
+  template: ReportTemplateConfig,
+  format: 'json' | 'csv' | 'txt',
+  name?: string
+): void {
+  const content = generateReportWithTemplate(schemes, comparison, audit, template, format);
+
+  const mimeTypeMap: Record<string, string> = {
+    json: 'application/json;charset=utf-8',
+    csv: 'text/csv;charset=utf-8',
+    txt: 'text/plain;charset=utf-8',
+  };
+
+  const mimeType = mimeTypeMap[format] || 'text/plain;charset=utf-8';
+  const fileName = name || `版式审校报告_${template.name}_${new Date().toLocaleString('zh-CN').replace(/[/:]/g, '-')}`;
+
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `${fileName.replace(/[\\/:*?"<>|]/g, '_')}.${format}`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
 }
