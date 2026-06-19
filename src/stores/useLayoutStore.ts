@@ -90,6 +90,13 @@ export const useLayoutStore = defineStore('layout', () => {
       return;
     }
 
+    const prevMargins = {
+      marginTop: params.value.marginTop,
+      marginBottom: params.value.marginBottom,
+      marginLeft: params.value.marginLeft,
+      marginRight: params.value.marginRight,
+    };
+
     if (marginLinkMode.value !== 'none' && typeof value === 'number') {
       const mode = marginLinkMode.value;
       if (key === 'marginTop' || key === 'marginBottom') {
@@ -117,12 +124,12 @@ export const useLayoutStore = defineStore('layout', () => {
 
     if (!result.valid) {
       params.value[key] = oldValue;
-      if (marginLinkMode.value !== 'none') {
-        const original = savedParams || DEFAULT_PARAMS;
-        params.value.marginTop = original.marginTop;
-        params.value.marginBottom = original.marginBottom;
-        params.value.marginLeft = original.marginLeft;
-        params.value.marginRight = original.marginRight;
+      if (marginLinkMode.value !== 'none' &&
+          (key === 'marginTop' || key === 'marginBottom' || key === 'marginLeft' || key === 'marginRight')) {
+        params.value.marginTop = prevMargins.marginTop;
+        params.value.marginBottom = prevMargins.marginBottom;
+        params.value.marginLeft = prevMargins.marginLeft;
+        params.value.marginRight = prevMargins.marginRight;
       }
       validation.value = validateLayoutParams(params.value);
     } else {

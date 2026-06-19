@@ -212,12 +212,26 @@ export function generateSvgContent(params: LayoutParams, includeDimensions: bool
   }
 
   const centerX = printX + printWidth / 2;
-  const fishtailSize = Math.min(printWidth * 0.15, rowHeight * 1.5);
-  const topFishtailY = printY + fishtailSize * 0.8;
-  const bottomFishtailY = printY + printHeight - fishtailSize * 0.8;
+  const fishtailSize = Math.min(printWidth * 0.12, rowHeight * 1.8, 20);
+
+  const fishtailFirstIdx = Math.min(4, rowLines.length - 1);
+  const fishtailTopY = rowLines[0] + (rowLines[fishtailFirstIdx] - rowLines[0]) / 2 + fishtailSize * 0.2;
+
+  const fishtailBottomStartIdx = Math.max(rowLines.length - 5, 0);
+  const fishtailBottomEndIdx = rowLines.length - 1;
+  const fishtailBottomY = rowLines[fishtailBottomStartIdx] + (rowLines[fishtailBottomEndIdx] - rowLines[fishtailBottomStartIdx]) / 2 - fishtailSize * 0.2;
+
   const showFishtail = fishtailStyle !== 'none';
-  const fishtailPathTop = showFishtail ? getFishtailPath(fishtailStyle, centerX, topFishtailY, fishtailSize) : '';
-  const fishtailPathBottom = showFishtail ? getFishtailPath(fishtailStyle, centerX, bottomFishtailY, fishtailSize) : '';
+  const fishtailPathTop = showFishtail ? getFishtailPath(fishtailStyle, centerX, fishtailTopY, fishtailSize) : '';
+  const fishtailPathBottom = showFishtail ? getFishtailPath(fishtailStyle, centerX, fishtailBottomY, fishtailSize) : '';
+
+  const fishtailLabel: Record<string, string> = {
+    none: '',
+    single: '单鱼尾',
+    double: '双鱼尾',
+    triple: '三鱼尾',
+    flowery: '花鱼尾',
+  };
 
   const svgParts: string[] = [];
 
@@ -235,6 +249,9 @@ export function generateSvgContent(params: LayoutParams, includeDimensions: bool
   svgParts.push(`  </pattern>`);
   svgParts.push(`  <filter id="lineBlur" x="-50%" y="-50%" width="200%" height="200%">`);
   svgParts.push(`    <feGaussianBlur in="SourceGraphic" stdDeviation="0.05"/>`);
+  svgParts.push(`  </filter>`);
+  svgParts.push(`  <filter id="fishtailShadow" x="-50%" y="-50%" width="200%" height="200%">`);
+  svgParts.push(`    <feDropShadow dx="0" dy="0.2" stdDeviation="0.1" flood-opacity="0.3"/>`);
   svgParts.push(`  </filter>`);
   svgParts.push(`</defs>`);
 
@@ -260,31 +277,40 @@ export function generateSvgContent(params: LayoutParams, includeDimensions: bool
 
   svgParts.push(`  <g class="column-lines">`);
   columnLines.forEach((x, index) => {
-    svgParts.push(`    <line x1="${x}" y1="${printY}" x2="${x}" y2="${printY + printHeight}" stroke="${lineColor}" stroke-width="${lineThickness}" filter="url(#lineBlur)"/>`);
+    svgParts.push(`    <line x1="${x}" y1="${printY}" x2="${x}" y2="${printY + printHeight}" stroke="${lineColor}" stroke-width="${lineThickness}" stroke-linecap="round" filter="url(#lineBlur)"/>`);
   });
   svgParts.push(`  </g>`);
 
   svgParts.push(`  <g class="row-lines">`);
   rowLines.forEach((y, index) => {
-    svgParts.push(`    <line x1="${bodyX}" y1="${y}" x2="${bodyX + bodyWidth}" y2="${y}" stroke="${lineColor}" stroke-width="${lineThickness}" filter="url(#lineBlur)"/>`);
+    svgParts.push(`    <line x1="${bodyX}" y1="${y}" x2="${bodyX + bodyWidth}" y2="${y}" stroke="${lineColor}" stroke-width="${lineThickness}" stroke-linecap="round" filter="url(#lineBlur)"/>`);
   });
   svgParts.push(`  </g>`);
 
   if (showFishtail) {
-    svgParts.push(`  <g class="fishtail" fill="${lineColor}">`);
-    svgParts.push(`    <path d="${fishtailPathTop}"/>`);
-    svgParts.push(`    <path d="${fishtailPathBottom}"/>`);
+    const strokeWidth = Math.max(0.05, lineThickness * 0.3);
+    svgParts.push(`  <g class="fishtail-group">`);
+    svgParts.push(`    <g class="fishtail fishtail-top" fill="${lineColor}" stroke="${lineColor}" stroke-width="${strokeWidth}" filter="url(#fishtailShadow)">`);
+    svgParts.push(`      <path d="${fishtailPathTop}"/>`);
+    svgParts.push(`    </g>`);
+    svgParts.push(`    <g class="fishtail fishtail-bottom" fill="${lineColor}" stroke="${lineColor}" stroke-width="${strokeWidth}" filter="url(#fishtailShadow)" transform="rotate(180, ${centerX}, ${fishtailBottomY})">`);
+    svgParts.push(`      <path d="${fishtailPathBottom}"/>`);
+    svgParts.push(`    </g>`);
     svgParts.push(`  </g>`);
   }
 
   svgParts.push(`</g>`);
 
   if (includeDimensions) {
-    svgParts.push(`<g class="dimensions" font-size="2.5" fill="#666">`);
-    svgParts.push(`  <text x="${paperWidth / 2}" y="${printY - 4}" text-anchor="middle">版心: ${printWidth.toFixed(1)} × ${printHeight.toFixed(1)} mm</text>`);
-    svgParts.push(`  <text x="${paperWidth / 2}" y="${paperHeight - 2}" text-anchor="middle">纸张: ${paperWidth} × ${paperHeight} mm</text>`);
-    svgParts.push(`  <text x="2" y="${printY + printHeight / 2}" transform="rotate(-90, 2, ${printY + printHeight / 2})">上: ${marginTop}mm</text>`);
-    svgParts.push(`  <text x="${paperWidth - 2}" y="${printY + printHeight / 2}" transform="rotate(90, ${paperWidth - 2}, ${printY + printHeight / 2})">下: ${marginBottom}mm</text>`);
+    const labelTop = Math.max(1, printY - 4);
+    svgParts.push(`<g class="dimensions" font-size="2.5" fill="#5D4037" font-family="'Source Code Pro', monospace">`);
+    svgParts.push(`  <text x="${paperWidth / 2}" y="${labelTop}" text-anchor="middle" font-weight="600">版心: ${printWidth.toFixed(1)} × ${printHeight.toFixed(1)} mm</text>`);
+    svgParts.push(`  <text x="${paperWidth / 2}" y="${paperHeight - 1.5}" text-anchor="middle">纸张: ${paperWidth} × ${paperHeight} mm</text>`);
+    svgParts.push(`  <text x="2" y="${printY + printHeight / 2}" transform="rotate(-90, 2, ${printY + printHeight / 2})">上: ${marginTop} / 下: ${marginBottom} mm</text>`);
+    svgParts.push(`  <text x="${paperWidth - 2}" y="${printY + printHeight / 2}" transform="rotate(90, ${paperWidth - 2}, ${printY + printHeight / 2})">左: ${marginLeft} / 右: ${marginRight} mm</text>`);
+    if (showFishtail) {
+      svgParts.push(`  <text x="${centerX}" y="${fishtailTopY + fishtailSize + 3}" text-anchor="middle" font-size="2" fill="#8B7355">${fishtailLabel[fishtailStyle] || ''}</text>`);
+    }
     svgParts.push(`</g>`);
   }
 
