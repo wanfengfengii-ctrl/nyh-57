@@ -1,22 +1,12 @@
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, computed, watch } from 'vue';
 import { useLayoutStore } from '../stores/useLayoutStore';
-import { FISHTAIL_OPTIONS, ANNOTATION_POSITION_OPTIONS } from '../types/layout';
-import type { FishtailType, AnnotationPosition } from '../types/layout';
-import { NForm, NFormItem, NInputNumber, NSelect, NCollapse, NCollapseItem, NSlider, NColorPicker, NInputGroupLabel } from 'naive-ui';
+import { FISHTAIL_OPTIONS, ANNOTATION_POSITION_OPTIONS, PAPER_PRESETS, MARGIN_LINK_MODES } from '../types/layout';
+import type { FishtailType, AnnotationPosition, PaperPreset, MarginLinkMode } from '../types/layout';
+import { NForm, NFormItem, NInputNumber, NSelect, NCollapse, NCollapseItem, NSlider, NColorPicker } from 'naive-ui';
 
 const store = useLayoutStore();
-const paperExpanded = ref(['paper', 'margin', 'grid', 'line', 'fishtail', 'annotation']);
-
-const paperPresets = [
-  { label: 'A4 (210×297mm)', value: { width: 210, height: 297 } },
-  { label: 'A5 (148×210mm)', value: { width: 148, height: 210 } },
-  { label: 'B5 (176×250mm)', value: { width: 176, height: 250 } },
-  { label: '16开 (185×260mm)', value: { width: 185, height: 260 } },
-  { label: '32开 (130×185mm)', value: { width: 130, height: 185 } },
-  { label: '古籍大本 (200×300mm)', value: { width: 200, height: 300 } },
-  { label: '古籍小本 (150×220mm)', value: { width: 150, height: 220 } },
-];
+const paperExpanded = ref(['paper', 'print', 'margin', 'grid', 'line', 'fishtail', 'annotation']);
 
 const lineColorPresets = [
   { label: '朱红 (传统)', value: '#C41E3A' },
@@ -26,9 +16,95 @@ const lineColorPresets = [
   { label: '赭石', value: '#8B4513' },
 ];
 
-function handlePaperPresetChange(value: { width: number; height: number } | null): void {
+const localPrintWidth = ref(store.stats.printWidth);
+const localPrintHeight = ref(store.stats.printHeight);
+watch(
+  () => store.stats.printWidth,
+  (v) => { localPrintWidth.value = v; }
+);
+watch(
+  () => store.stats.printHeight,
+  (v) => { localPrintHeight.value = v; }
+);
+
+const fieldErrors = ref<Record<string, string | null>>({});
+
+function validateField<K extends keyof typeof store.params>(key: K, value: any): string | null {
+  const err = store.validateSingle(key, value);
+  fieldErrors.value[key] = err;
+  return err;
+}
+
+function clearFieldError(key: string): void {
+  fieldErrors.value[key] = null;
+}
+
+function hasError(key: string): boolean {
+  return !!fieldErrors.value[key];
+}
+
+function getError(key: string): string | null {
+  return fieldErrors.value[key] || null;
+}
+
+const printWidthMax = computed(() => store.params.paperWidth - 2);
+const printHeightMax = computed(() => store.params.paperHeight - 2);
+
+function validatePrintWidth(): boolean {
+  const val = localPrintWidth.value;
+  if (val < 5) {
+    fieldErrors.value.printWidth = '版心宽度最小为5mm';
+    return false;
+  }
+  if (val > printWidthMax.value) {
+    fieldErrors.value.printWidth = `版心宽度最大为${printWidthMax.value}mm（纸张宽度-2）`;
+    return false;
+  }
+  fieldErrors.value.printWidth = null;
+  return true;
+}
+
+function validatePrintHeight(): boolean {
+  const val = localPrintHeight.value;
+  if (val < 5) {
+    fieldErrors.value.printHeight = '版心高度最小为5mm';
+    return false;
+  }
+  if (val > printHeightMax.value) {
+    fieldErrors.value.printHeight = `版心高度最大为${printHeightMax.value}mm（纸张高度-2）`;
+    return false;
+  }
+  fieldErrors.value.printHeight = null;
+  return true;
+}
+
+function handlePrintWidthBlur(): void {
+  if (validatePrintWidth() && validatePrintHeight()) {
+    store.setPrintSize(localPrintWidth.value, localPrintHeight.value, true, true);
+  }
+}
+
+function handlePrintHeightBlur(): void {
+  if (validatePrintWidth() && validatePrintHeight()) {
+    store.setPrintSize(localPrintWidth.value, localPrintHeight.value, true, true);
+  }
+}
+
+function handlePrintWidthKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Enter') {
+    handlePrintWidthBlur();
+  }
+}
+
+function handlePrintHeightKeydown(e: KeyboardEvent): void {
+  if (e.key === 'Enter') {
+    handlePrintHeightBlur();
+  }
+}
+
+function handlePaperPresetChange(value: PaperPreset | null): void {
   if (value) {
-    store.setPaperSize(value.width, value.height);
+    store.applyPaperPreset(value);
   }
 }
 
@@ -37,7 +113,10 @@ function handleNumberChange<K extends keyof typeof store.params>(
   value: number | null
 ): void {
   if (value !== null) {
-    store.updateParam(key, value as typeof store.params[K]);
+    const err = validateField(key, value);
+    if (!err) {
+      store.updateParam(key, value as typeof store.params[K]);
+    }
   }
 }
 
@@ -46,7 +125,10 @@ function handleIntegerChange<K extends keyof typeof store.params>(
   value: number | null
 ): void {
   if (value !== null && Number.isInteger(value)) {
-    store.updateParam(key, value as typeof store.params[K]);
+    const err = validateField(key, value);
+    if (!err) {
+      store.updateParam(key, value as typeof store.params[K]);
+    }
   }
 }
 
@@ -68,16 +150,21 @@ function handleSliderChange<K extends keyof typeof store.params>(
 ): void {
   store.updateParam(key, value as typeof store.params[K]);
 }
+
+function handleMarginLinkModeChange(value: MarginLinkMode): void {
+  store.setMarginLinkMode(value);
+}
 </script>
 
 <template>
   <div class="control-panel">
-    <n-collapse v-model:expanded-names="paperExpanded" :default-expanded-names="['paper', 'margin', 'grid', 'line', 'fishtail', 'annotation']">
+    <n-collapse v-model:expanded-names="paperExpanded" :default-expanded-names="['paper', 'print', 'margin', 'grid', 'line', 'fishtail', 'annotation']">
       <n-collapse-item title="纸张尺寸" name="paper">
         <n-form label-placement="top" label-width="auto">
           <n-form-item label="预设尺寸">
             <n-select
-              :options="paperPresets.map(p => ({ label: p.label, value: p.value })) as any"
+              :value="store.currentPresetId"
+              :options="PAPER_PRESETS.filter(p => p.id !== 'custom').map(p => ({ label: p.label, value: p })) as any"
               @update:value="handlePaperPresetChange"
               placeholder="选择预设尺寸"
               clearable
@@ -90,9 +177,12 @@ function handleSliderChange<K extends keyof typeof store.params>(
                 :min="10"
                 :max="1000"
                 :step="1"
+                :class="{ 'input-error': hasError('paperWidth') }"
                 @update:value="(v) => handleNumberChange('paperWidth', v)"
+                @focus="clearFieldError('paperWidth')"
                 style="width: 100%"
               />
+              <div v-if="hasError('paperWidth')" class="error-message">{{ getError('paperWidth') }}</div>
             </n-form-item>
             <n-form-item label="高度 (mm)" class="flex-1">
               <n-input-number
@@ -100,9 +190,52 @@ function handleSliderChange<K extends keyof typeof store.params>(
                 :min="10"
                 :max="1000"
                 :step="1"
+                :class="{ 'input-error': hasError('paperHeight') }"
                 @update:value="(v) => handleNumberChange('paperHeight', v)"
+                @focus="clearFieldError('paperHeight')"
                 style="width: 100%"
               />
+              <div v-if="hasError('paperHeight')" class="error-message">{{ getError('paperHeight') }}</div>
+            </n-form-item>
+          </div>
+        </n-form>
+      </n-collapse-item>
+
+      <n-collapse-item title="版心尺寸" name="print">
+        <n-form label-placement="top" label-width="auto">
+          <div class="info-box info-hint">
+            <span class="info-label">当前纸张:</span>
+            <span class="info-value">{{ store.params.paperWidth }} × {{ store.params.paperHeight }} mm</span>
+          </div>
+          <div class="hint-text">修改版心尺寸后，边距将自动调整使版心居中</div>
+          <div class="input-row">
+            <n-form-item label="版心宽度 (mm)" class="flex-1">
+              <n-input-number
+                v-model:value="localPrintWidth"
+                :min="5"
+                :max="printWidthMax"
+                :step="0.5"
+                :class="{ 'input-error': hasError('printWidth') }"
+                @blur="handlePrintWidthBlur"
+                @keydown="handlePrintWidthKeydown"
+                @focus="clearFieldError('printWidth')"
+                style="width: 100%"
+              />
+              <div v-if="hasError('printWidth')" class="error-message">{{ getError('printWidth') }}</div>
+            </n-form-item>
+            <n-form-item label="版心高度 (mm)" class="flex-1">
+              <n-input-number
+                v-model:value="localPrintHeight"
+                :min="5"
+                :max="printHeightMax"
+                :step="0.5"
+                :class="{ 'input-error': hasError('printHeight') }"
+                @blur="handlePrintHeightBlur"
+                @keydown="handlePrintHeightKeydown"
+                @focus="clearFieldError('printHeight')"
+                style="width: 100%"
+              />
+              <div v-if="hasError('printHeight')" class="error-message">{{ getError('printHeight') }}</div>
             </n-form-item>
           </div>
         </n-form>
@@ -110,6 +243,13 @@ function handleSliderChange<K extends keyof typeof store.params>(
 
       <n-collapse-item title="版心边距" name="margin">
         <n-form label-placement="top" label-width="auto">
+          <n-form-item label="联动模式">
+            <n-select
+              :value="store.marginLinkMode"
+              :options="MARGIN_LINK_MODES"
+              @update:value="handleMarginLinkModeChange"
+            />
+          </n-form-item>
           <div class="input-row">
             <n-form-item label="上边距 (mm)" class="flex-1">
               <n-input-number
@@ -117,9 +257,12 @@ function handleSliderChange<K extends keyof typeof store.params>(
                 :min="1"
                 :max="200"
                 :step="0.5"
+                :class="{ 'input-error': hasError('marginTop') }"
                 @update:value="(v) => handleNumberChange('marginTop', v)"
+                @focus="clearFieldError('marginTop')"
                 style="width: 100%"
               />
+              <div v-if="hasError('marginTop')" class="error-message">{{ getError('marginTop') }}</div>
             </n-form-item>
             <n-form-item label="下边距 (mm)" class="flex-1">
               <n-input-number
@@ -127,9 +270,12 @@ function handleSliderChange<K extends keyof typeof store.params>(
                 :min="1"
                 :max="200"
                 :step="0.5"
+                :class="{ 'input-error': hasError('marginBottom') }"
                 @update:value="(v) => handleNumberChange('marginBottom', v)"
+                @focus="clearFieldError('marginBottom')"
                 style="width: 100%"
               />
+              <div v-if="hasError('marginBottom')" class="error-message">{{ getError('marginBottom') }}</div>
             </n-form-item>
           </div>
           <div class="input-row">
@@ -139,9 +285,12 @@ function handleSliderChange<K extends keyof typeof store.params>(
                 :min="1"
                 :max="200"
                 :step="0.5"
+                :class="{ 'input-error': hasError('marginLeft') }"
                 @update:value="(v) => handleNumberChange('marginLeft', v)"
+                @focus="clearFieldError('marginLeft')"
                 style="width: 100%"
               />
+              <div v-if="hasError('marginLeft')" class="error-message">{{ getError('marginLeft') }}</div>
             </n-form-item>
             <n-form-item label="右边距 (mm)" class="flex-1">
               <n-input-number
@@ -149,9 +298,12 @@ function handleSliderChange<K extends keyof typeof store.params>(
                 :min="1"
                 :max="200"
                 :step="0.5"
+                :class="{ 'input-error': hasError('marginRight') }"
                 @update:value="(v) => handleNumberChange('marginRight', v)"
+                @focus="clearFieldError('marginRight')"
                 style="width: 100%"
               />
+              <div v-if="hasError('marginRight')" class="error-message">{{ getError('marginRight') }}</div>
             </n-form-item>
           </div>
           <div class="info-box">
@@ -170,9 +322,12 @@ function handleSliderChange<K extends keyof typeof store.params>(
                 :min="1"
                 :max="50"
                 :step="1"
+                :class="{ 'input-error': hasError('columnCount') }"
                 @update:value="(v) => handleIntegerChange('columnCount', v)"
+                @focus="clearFieldError('columnCount')"
                 style="width: 100%"
               />
+              <div v-if="hasError('columnCount')" class="error-message">{{ getError('columnCount') }}</div>
             </n-form-item>
             <n-form-item label="行数" class="flex-1">
               <n-input-number
@@ -180,9 +335,12 @@ function handleSliderChange<K extends keyof typeof store.params>(
                 :min="1"
                 :max="100"
                 :step="1"
+                :class="{ 'input-error': hasError('rowCount') }"
                 @update:value="(v) => handleIntegerChange('rowCount', v)"
+                @focus="clearFieldError('rowCount')"
                 style="width: 100%"
               />
+              <div v-if="hasError('rowCount')" class="error-message">{{ getError('rowCount') }}</div>
             </n-form-item>
           </div>
           <div class="info-box">
@@ -336,6 +494,18 @@ function handleSliderChange<K extends keyof typeof store.params>(
   margin-top: 8px;
 }
 
+.info-hint {
+  margin-top: 0;
+  margin-bottom: 8px;
+}
+
+.hint-text {
+  font-size: 12px;
+  color: #8B7355;
+  margin-bottom: 12px;
+  padding: 0 4px;
+}
+
 .info-label {
   font-size: 13px;
   color: #6B5B4F;
@@ -407,6 +577,26 @@ function handleSliderChange<K extends keyof typeof store.params>(
 
 .fishtail-svg {
   display: block;
+}
+
+.error-message {
+  font-size: 12px;
+  color: #d03050;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+:deep(.input-error .n-input-number) {
+  border-color: #d03050 !important;
+}
+
+:deep(.input-error .n-input-number:hover) {
+  border-color: #d03050 !important;
+}
+
+:deep(.input-error .n-input-number:focus) {
+  border-color: #d03050 !important;
+  box-shadow: 0 0 0 2px rgba(208, 48, 80, 0.1);
 }
 
 :deep(.n-collapse-item__header) {

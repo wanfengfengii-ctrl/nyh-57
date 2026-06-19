@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useLayoutStore } from '../stores/useLayoutStore';
-import { formatArea, formatRatio } from '../utils/calculation';
+import { formatArea, formatRatio, formatAreaCompact } from '../utils/calculation';
 import { NCard, NProgress, NStatistic } from 'naive-ui';
 
 const store = useLayoutStore();
@@ -19,6 +19,10 @@ const writingRatioDisplay = computed(() => formatRatio(store.stats.writingRatio)
 
 const totalCells = computed(() => store.params.columnCount * store.params.rowCount);
 const cellCountDisplay = computed(() => `${store.params.columnCount} × ${store.params.rowCount} = ${totalCells.value} 格`);
+
+const areaSumDisplay = computed(() => formatAreaCompact(store.stats.areaSumCheck.sum));
+const areaDiffDisplay = computed(() => formatAreaCompact(store.stats.areaSumCheck.diff));
+const areaCheckIsMatch = computed(() => store.stats.areaSumCheck.isMatch);
 </script>
 
 <template>
@@ -110,6 +114,34 @@ const cellCountDisplay = computed(() => `${store.params.columnCount} × ${store.
               rail-color="#F5EFE0"
             />
             <span class="progress-label">{{ lineRatioDisplay }}</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="area-check-section">
+        <div class="check-card" :class="{ pass: areaCheckIsMatch, fail: !areaCheckIsMatch }">
+          <div class="check-header">
+            <span class="check-title">
+              <span class="check-icon">{{ areaCheckIsMatch ? '✓' : '⚠' }}</span>
+              面积校验
+            </span>
+            <span class="check-status" :class="areaCheckIsMatch ? 'status-pass' : 'status-fail'">
+              {{ areaCheckIsMatch ? '通过' : '偏差' }}
+            </span>
+          </div>
+          <div class="check-body">
+            <div class="check-row">
+              <span class="check-label">书写区 + 批注区 + 栏线 =</span>
+              <span class="check-value">{{ areaSumDisplay }}</span>
+            </div>
+            <div class="check-row">
+              <span class="check-label">版心面积 =</span>
+              <span class="check-value">{{ formatAreaCompact(store.stats.printArea) }}</span>
+            </div>
+            <div class="check-row diff-row">
+              <span class="check-label">差值：</span>
+              <span class="check-value diff-value">{{ areaDiffDisplay }}</span>
+            </div>
           </div>
         </div>
       </div>
@@ -221,20 +253,31 @@ const cellCountDisplay = computed(() => `${store.params.columnCount} × ${store.
         <div class="param-item">
           <span class="param-label">批注区</span>
           <span class="param-value">
-            {{ { left: '左侧', right: '右侧', both: '双侧' }[store.params.annotationPosition] }}
-            ({{ store.params.annotationWidth }}mm)
+            {{ { none: '无', left: '左侧', right: '右侧', both: '双侧' }[store.params.annotationPosition] }}
+            <template v-if="store.params.annotationPosition !== 'none'">({{ store.params.annotationWidth }}mm)</template>
           </span>
         </div>
       </div>
     </n-card>
 
-    <div v-if="store.errors.length > 0" class="error-panel">
-      <div class="error-title">⚠️ 参数警告</div>
-      <ul class="error-list">
-        <li v-for="(error, index) in store.errors" :key="index" class="error-item">
-          {{ error }}
-        </li>
-      </ul>
+    <div v-if="store.errors.length > 0 || store.warnings.length > 0" class="validation-panel">
+      <div v-if="store.errors.length > 0" class="error-panel">
+        <div class="error-title">⚠️ 参数错误</div>
+        <ul class="error-list">
+          <li v-for="(error, index) in store.errors" :key="'err-' + index" class="error-item">
+            {{ error }}
+          </li>
+        </ul>
+      </div>
+
+      <div v-if="store.warnings.length > 0" class="warning-panel">
+        <div class="warning-title">⚡ 参数提醒</div>
+        <ul class="warning-list">
+          <li v-for="(warning, index) in store.warnings" :key="'warn-' + index" class="warning-item">
+            {{ warning }}
+          </li>
+        </ul>
+      </div>
     </div>
   </div>
 </template>
@@ -381,6 +424,110 @@ const cellCountDisplay = computed(() => `${store.params.columnCount} × ${store.
   font-family: 'Source Code Pro', monospace;
 }
 
+.area-check-section {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px dashed #E8DFCC;
+}
+
+.check-card {
+  border-radius: 8px;
+  padding: 14px;
+  border: 1px solid;
+}
+
+.check-card.pass {
+  background: #F0F9F0;
+  border-color: #A8D5A8;
+}
+
+.check-card.fail {
+  background: #FFF5F5;
+  border-color: #FFCDD2;
+}
+
+.check-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.check-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.check-card.pass .check-title {
+  color: #2E7D32;
+}
+
+.check-card.fail .check-title {
+  color: #C62828;
+}
+
+.check-icon {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.check-status {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 12px;
+}
+
+.check-status.status-pass {
+  background: #4CAF50;
+  color: #fff;
+}
+
+.check-status.status-fail {
+  background: #E53935;
+  color: #fff;
+}
+
+.check-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.check-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+}
+
+.check-label {
+  color: #6B5B4F;
+}
+
+.check-value {
+  font-weight: 600;
+  font-family: 'Source Code Pro', monospace;
+  color: #3D2914;
+}
+
+.diff-row {
+  padding-top: 6px;
+  margin-top: 4px;
+  border-top: 1px dashed rgba(0, 0, 0, 0.1);
+}
+
+.check-card.pass .diff-value {
+  color: #2E7D32;
+}
+
+.check-card.fail .diff-value {
+  color: #C62828;
+}
+
 .visual-pie {
   display: flex;
   align-items: center;
@@ -452,6 +599,12 @@ const cellCountDisplay = computed(() => `${store.params.columnCount} × ${store.
   font-family: 'Source Code Pro', monospace;
 }
 
+.validation-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .error-panel {
   background: #FFF5F5;
   border: 1px solid #FFCDD2;
@@ -474,6 +627,31 @@ const cellCountDisplay = computed(() => `${store.params.columnCount} × ${store.
 .error-item {
   font-size: 12px;
   color: #C62828;
+  line-height: 1.6;
+}
+
+.warning-panel {
+  background: #FFF8E1;
+  border: 1px solid #FFE082;
+  border-radius: 6px;
+  padding: 12px;
+}
+
+.warning-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #E65100;
+  margin-bottom: 8px;
+}
+
+.warning-list {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.warning-item {
+  font-size: 12px;
+  color: #E65100;
   line-height: 1.6;
 }
 </style>

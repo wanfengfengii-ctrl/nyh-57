@@ -5,6 +5,7 @@ import type { FishtailType } from '../types/layout';
 
 const store = useLayoutStore();
 const scale = ref(1);
+const svgRef = ref<SVGSVGElement | null>(null);
 
 const viewBox = computed(() => {
   const { paperWidth, paperHeight } = store.params;
@@ -106,16 +107,25 @@ function getFishtailPath(style: FishtailType, x: number, y: number, size: number
   }
 }
 
-const fishtailSize = computed(() => Math.min(printWidth.value * 0.15, store.stats.rowHeight * 1.5));
-const topFishtailY = computed(() => printY.value + fishtailSize.value * 0.8);
-const bottomFishtailY = computed(() => printY.value + printHeight.value - fishtailSize.value * 0.8);
+const fishtailSize = computed(() => Math.min(printWidth.value * 0.12, store.stats.rowHeight * 1.8, 20));
+const topFishtailY = computed(() => {
+  const firstLineY = rowLines.value[0] || printY.value;
+  const lastLineY = rowLines.value[Math.min(4, rowLines.value.length - 1)] || firstLineY;
+  return firstLineY + (lastLineY - firstLineY) / 2 + fishtailSize.value * 0.2;
+});
+const bottomFishtailY = computed(() => {
+  const totalRows = rowLines.value.length;
+  const firstLineY = rowLines.value[Math.max(totalRows - 5, 0)] || printY.value + printHeight.value;
+  const lastLineY = rowLines.value[totalRows - 1] || firstLineY;
+  return firstLineY + (lastLineY - firstLineY) / 2 - fishtailSize.value * 0.2;
+});
 
 const showFishtail = computed(() => store.params.fishtailStyle !== 'none');
 const fishtailPathTop = computed(() =>
-  getFishtailPath(store.params.fishtailStyle, centerX.value, topFishtailY.value, fishtailSize.value)
+  showFishtail.value ? getFishtailPath(store.params.fishtailStyle, centerX.value, topFishtailY.value, fishtailSize.value) : ''
 );
 const fishtailPathBottom = computed(() =>
-  getFishtailPath(store.params.fishtailStyle, centerX.value, bottomFishtailY.value, fishtailSize.value)
+  showFishtail.value ? getFishtailPath(store.params.fishtailStyle, centerX.value, bottomFishtailY.value, fishtailSize.value) : ''
 );
 
 function zoomIn(): void {
@@ -129,6 +139,11 @@ function zoomOut(): void {
 function resetZoom(): void {
   scale.value = 1;
 }
+
+defineExpose({
+  svgRef,
+  getFishtailPath,
+});
 </script>
 
 <template>
@@ -138,16 +153,27 @@ function resetZoom(): void {
       <span class="zoom-level">{{ Math.round(scale * 100) }}%</span>
       <button @click="zoomIn" class="zoom-btn" title="放大">+</button>
       <button @click="resetZoom" class="zoom-btn reset" title="重置">⟲</button>
+      <div class="toolbar-spacer"></div>
+      <span class="preset-indicator" :title="store.currentPresetId ? '当前匹配预设' : '自定义参数'">
+        <span class="indicator-dot" :class="{ matched: !!store.currentPresetId }"></span>
+        {{ store.currentPresetId ? '已匹配预设' : '自定义设置' }}
+      </span>
     </div>
 
     <div class="preview-wrapper">
       <div class="svg-container" :style="{ transform: `scale(${scale})` }">
         <svg
+          ref="svgRef"
           :viewBox="viewBox"
           :width="store.params.paperWidth"
           :height="store.params.paperHeight"
           class="layout-svg"
+          xmlns="http://www.w3.org/2000/svg"
+          xmlns:xlink="http://www.w3.org/1999/xlink"
         >
+          <title>古籍朱丝栏版式 - {{ store.params.paperWidth }}×{{ store.params.paperHeight }}mm</title>
+          <desc>版心: {{ printWidth.toFixed(2) }}×{{ printHeight.toFixed(2) }}mm | {{ store.params.columnCount }}栏×{{ store.params.rowCount }}行</desc>
+
           <defs>
             <pattern id="paperTexture" patternUnits="userSpaceOnUse" width="4" height="4">
               <rect width="4" height="4" fill="#F5EFE0" />
@@ -156,6 +182,9 @@ function resetZoom(): void {
             </pattern>
             <filter id="lineBlur" x="-50%" y="-50%" width="200%" height="200%">
               <feGaussianBlur in="SourceGraphic" stdDeviation="0.05" />
+            </filter>
+            <filter id="fishtailShadow" x="-50%" y="-50%" width="200%" height="200%">
+              <feDropShadow dx="0" dy="0.2" stdDeviation="0.1" flood-opacity="0.3" />
             </filter>
           </defs>
 
@@ -186,7 +215,7 @@ function resetZoom(): void {
               font-size="3"
               text-anchor="middle"
               dominant-baseline="middle"
-              transform="rotate(-90, printX + annotationLeftWidth / 2, printY + printHeight / 2)"
+              :transform="`rotate(-90, ${printX + annotationLeftWidth / 2}, ${printY + printHeight / 2})`"
             >
               批注区
             </text>
@@ -211,7 +240,7 @@ function resetZoom(): void {
               font-size="3"
               text-anchor="middle"
               dominant-baseline="middle"
-              transform="rotate(90, printX + printWidth - annotationRightWidth / 2, printY + printHeight / 2)"
+              :transform="`rotate(90, ${printX + printWidth - annotationRightWidth / 2}, ${printY + printHeight / 2})`"
             >
               批注区
             </text>
@@ -225,7 +254,7 @@ function resetZoom(): void {
               :height="printHeight"
               fill="none"
               stroke="#1A1A1A"
-              stroke-width="0.2"
+              stroke-width="0.25"
             />
 
             <g class="column-lines">
@@ -239,6 +268,7 @@ function resetZoom(): void {
                 :stroke="store.params.lineColor"
                 :stroke-width="store.params.lineThickness"
                 filter="url(#lineBlur)"
+                :stroke-linecap="'round'"
               />
             </g>
 
@@ -253,31 +283,59 @@ function resetZoom(): void {
                 :stroke="store.params.lineColor"
                 :stroke-width="store.params.lineThickness"
                 filter="url(#lineBlur)"
+                :stroke-linecap="'round'"
               />
             </g>
 
-            <g v-if="showFishtail" class="fishtail" :fill="store.params.lineColor">
-              <path :d="fishtailPathTop" />
-              <path :d="fishtailPathBottom" />
+            <g v-if="showFishtail" class="fishtail-group">
+              <g
+                class="fishtail fishtail-top"
+                :fill="store.params.lineColor"
+                :stroke="store.params.lineColor"
+                :stroke-width="Math.max(0.05, store.params.lineThickness * 0.3)"
+                filter="url(#fishtailShadow)"
+              >
+                <path :d="fishtailPathTop" />
+              </g>
+              <g
+                class="fishtail fishtail-bottom"
+                :fill="store.params.lineColor"
+                :stroke="store.params.lineColor"
+                :stroke-width="Math.max(0.05, store.params.lineThickness * 0.3)"
+                filter="url(#fishtailShadow)"
+                :transform="`rotate(180, ${centerX}, ${bottomFishtailY})`"
+              >
+                <path :d="fishtailPathBottom" />
+              </g>
             </g>
           </g>
 
-          <g class="dimensions" font-size="2.5" fill="#666">
-            <text :x="store.params.paperWidth / 2" :y="printY - 4" text-anchor="middle">
+          <g class="dimensions" font-size="2.5" fill="#5D4037" font-family="'Source Code Pro', monospace">
+            <text :x="store.params.paperWidth / 2" :y="Math.max(1, printY - 4)" text-anchor="middle" font-weight="600">
               版心: {{ printWidth.toFixed(1) }} × {{ printHeight.toFixed(1) }} mm
             </text>
-            <text :x="store.params.paperWidth / 2" :y="store.params.paperHeight - 2" text-anchor="middle">
+            <text :x="store.params.paperWidth / 2" :y="store.params.paperHeight - 1.5" text-anchor="middle">
               纸张: {{ store.params.paperWidth }} × {{ store.params.paperHeight }} mm
             </text>
-            <text :x="2" :y="printY + printHeight / 2" transform="rotate(-90, 2, printY + printHeight / 2)">
-              上: {{ store.params.marginTop }}mm
+            <text :x="2" :y="printY + printHeight / 2" :transform="`rotate(-90, 2, ${printY + printHeight / 2})`">
+              上: {{ store.params.marginTop }} / 下: {{ store.params.marginBottom }} mm
             </text>
             <text
               :x="store.params.paperWidth - 2"
               :y="printY + printHeight / 2"
-              transform="rotate(90, store.params.paperWidth - 2, printY + printHeight / 2)"
+              :transform="`rotate(90, ${store.params.paperWidth - 2}, ${printY + printHeight / 2})`"
             >
-              下: {{ store.params.marginBottom }}mm
+              左: {{ store.params.marginLeft }} / 右: {{ store.params.marginRight }} mm
+            </text>
+            <text
+              v-if="showFishtail"
+              :x="centerX"
+              :y="topFishtailY + fishtailSize + 3"
+              text-anchor="middle"
+              font-size="2"
+              fill="#8B7355"
+            >
+              {{ { none: '', single: '单鱼尾', double: '双鱼尾', triple: '三鱼尾', flowery: '花鱼尾' }[store.params.fishtailStyle] }}
             </text>
           </g>
         </svg>
@@ -306,6 +364,35 @@ function resetZoom(): void {
   border-bottom: 1px solid #D4C4A8;
 }
 
+.toolbar-spacer {
+  flex: 1;
+}
+
+.preset-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #6B5B4F;
+  padding: 4px 10px;
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 12px;
+  border: 1px solid #D4C4A8;
+}
+
+.indicator-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #BDBDBD;
+  transition: all 0.3s ease;
+}
+
+.indicator-dot.matched {
+  background: #4CAF50;
+  box-shadow: 0 0 0 2px rgba(76, 175, 80, 0.2);
+}
+
 .zoom-btn {
   width: 32px;
   height: 32px;
@@ -316,6 +403,10 @@ function resetZoom(): void {
   font-size: 18px;
   color: #3D2914;
   transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
 }
 
 .zoom-btn:hover {
@@ -334,6 +425,7 @@ function resetZoom(): void {
   font-weight: 500;
   min-width: 60px;
   text-align: center;
+  font-family: 'Source Code Pro', monospace;
 }
 
 .preview-wrapper {
