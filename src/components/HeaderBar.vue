@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { ref, computed, h } from 'vue';
+import { ref, computed, h, onMounted } from 'vue';
 import { useLayoutStore } from '../stores/useLayoutStore';
+import { useComparisonStore } from '../stores/useComparisonStore';
 import { importFromFile } from '../utils/export';
+import ComparisonPanel from './ComparisonPanel.vue';
 import {
   useMessage,
   useDialog,
@@ -14,6 +16,7 @@ import {
   NModal,
   NSpace,
   NThing,
+  NBadge,
 } from 'naive-ui';
 import {
   DownloadOutline,
@@ -24,12 +27,18 @@ import {
   ListOutline,
   TimeOutline,
   ChevronDownOutline,
+  GitCompareOutline,
 } from '@vicons/ionicons5';
 import type { LayoutParams, ExportOptions } from '../types/layout';
 
 const store = useLayoutStore();
+const comparisonStore = useComparisonStore();
 const message = useMessage();
 const dialog = useDialog();
+
+onMounted(() => {
+  comparisonStore.refreshSchemes();
+});
 
 const fileInputRef = ref<HTMLInputElement | null>(null);
 
@@ -375,6 +384,21 @@ function handleClearAllHistory(): void {
         </template>
         历史记录
       </n-button>
+
+      <n-button type="primary" size="large" @click="comparisonStore.openPanel">
+        <template #icon>
+          <n-badge
+            :value="comparisonStore.selectedSchemeIds.length"
+            :max="99"
+            :show-zero="false"
+            type="warning"
+            style="margin-right: 4px"
+          >
+            <git-compare-outline />
+          </n-badge>
+        </template>
+        对比审校
+      </n-button>
     </div>
 
     <input
@@ -562,6 +586,8 @@ function handleClearAllHistory(): void {
         </n-list>
       </div>
     </n-modal>
+
+    <ComparisonPanel />
   </header>
 </template>
 
