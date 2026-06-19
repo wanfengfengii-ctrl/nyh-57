@@ -18,6 +18,12 @@ import type {
   ArchiveStats,
   ArchiveItemType,
   ReportTemplateConfig,
+  SchemeGroup,
+  IssueTracking,
+  IssueStatus,
+  SchemeReview,
+  SchemeReviewStatus,
+  ArchiveFilter,
 } from '../types/comparison';
 import {
   DIFF_CATEGORY_LABELS,
@@ -31,6 +37,10 @@ import {
   MAX_CUSTOM_RULES,
   CUSTOM_RULE_FIELD_LABELS,
   CUSTOM_RULE_OPERATOR_LABELS,
+  GROUP_STORAGE_KEY,
+  ISSUE_TRACKING_STORAGE_KEY,
+  SCHEME_REVIEW_STORAGE_KEY,
+  MAX_GROUPS,
 } from '../types/comparison';
 import { calculateLayoutStats, formatArea, formatRatio } from './calculation';
 import { validateLayoutParams } from './validation';
@@ -1576,4 +1586,205 @@ export function exportReportWithTemplate(
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+}
+
+export function loadGroups(): SchemeGroup[] {
+  try {
+    const saved = localStorage.getItem(GROUP_STORAGE_KEY);
+    if (!saved) return [];
+    const groups = JSON.parse(saved) as SchemeGroup[];
+    return Array.isArray(groups) ? groups : [];
+  } catch (e) {
+    console.warn('加载方案分组失败:', e);
+    return [];
+  }
+}
+
+export function saveGroups(groups: SchemeGroup[]): void {
+  try {
+    localStorage.setItem(GROUP_STORAGE_KEY, JSON.stringify(groups));
+  } catch (e) {
+    console.warn('保存方案分组失败:', e);
+  }
+}
+
+export function addGroup(name: string, description?: string, color?: string): SchemeGroup | null {
+  const groups = loadGroups();
+  if (groups.length >= MAX_GROUPS) {
+    console.warn(`分组数量已达上限 (${MAX_GROUPS})`);
+    return null;
+  }
+  const group: SchemeGroup = {
+    id: `grp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    name,
+    description,
+    schemeIds: [],
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    color,
+  };
+  groups.unshift(group);
+  saveGroups(groups);
+  return group;
+}
+
+export function updateGroup(id: string, updates: Partial<SchemeGroup>): boolean {
+  const groups = loadGroups();
+  const index = groups.findIndex(g => g.id === id);
+  if (index === -1) return false;
+  groups[index] = { ...groups[index], ...updates, updatedAt: Date.now() };
+  saveGroups(groups);
+  return true;
+}
+
+export function deleteGroup(id: string): boolean {
+  const groups = loadGroups();
+  const filtered = groups.filter(g => g.id !== id);
+  if (filtered.length === groups.length) return false;
+  saveGroups(filtered);
+  return true;
+}
+
+export function addSchemeToGroup(groupId: string, schemeId: string): boolean {
+  const groups = loadGroups();
+  const group = groups.find(g => g.id === groupId);
+  if (!group) return false;
+  if (group.schemeIds.includes(schemeId)) return false;
+  group.schemeIds.push(schemeId);
+  group.updatedAt = Date.now();
+  saveGroups(groups);
+  return true;
+}
+
+export function removeSchemeFromGroup(groupId: string, schemeId: string): boolean {
+  const groups = loadGroups();
+  const group = groups.find(g => g.id === groupId);
+  if (!group) return false;
+  const idx = group.schemeIds.indexOf(schemeId);
+  if (idx === -1) return false;
+  group.schemeIds.splice(idx, 1);
+  group.updatedAt = Date.now();
+  saveGroups(groups);
+  return true;
+}
+
+export function loadIssueTrackings(): IssueTracking[] {
+  try {
+    const saved = localStorage.getItem(ISSUE_TRACKING_STORAGE_KEY);
+    if (!saved) return [];
+    const trackings = JSON.parse(saved) as IssueTracking[];
+    return Array.isArray(trackings) ? trackings : [];
+  } catch (e) {
+    console.warn('加载问题追踪失败:', e);
+    return [];
+  }
+}
+
+export function saveIssueTrackings(trackings: IssueTracking[]): void {
+  try {
+    localStorage.setItem(ISSUE_TRACKING_STORAGE_KEY, JSON.stringify(trackings));
+  } catch (e) {
+    console.warn('保存问题追踪失败:', e);
+  }
+}
+
+export function updateIssueTracking(issueId: string, status: IssueStatus, note?: string): IssueTracking | null {
+  const trackings = loadIssueTrackings();
+  const existing = trackings.find(t => t.issueId === issueId);
+  if (existing) {
+    existing.status = status;
+    if (note !== undefined) existing.note = note;
+    if (status === 'resolved') existing.resolvedAt = Date.now();
+    saveIssueTrackings(trackings);
+    return existing;
+  }
+  const tracking: IssueTracking = {
+    issueId,
+    status,
+    note,
+    resolvedAt: status === 'resolved' ? Date.now() : undefined,
+  };
+  trackings.push(tracking);
+  saveIssueTrackings(trackings);
+  return tracking;
+}
+
+export function getIssueTracking(issueId: string): IssueTracking | null {
+  const trackings = loadIssueTrackings();
+  return trackings.find(t => t.issueId === issueId) || null;
+}
+
+export function loadSchemeReviews(): SchemeReview[] {
+  try {
+    const saved = localStorage.getItem(SCHEME_REVIEW_STORAGE_KEY);
+    if (!saved) return [];
+    const reviews = JSON.parse(saved) as SchemeReview[];
+    return Array.isArray(reviews) ? reviews : [];
+  } catch (e) {
+    console.warn('加载方案审核状态失败:', e);
+    return [];
+  }
+}
+
+export function saveSchemeReviews(reviews: SchemeReview[]): void {
+  try {
+    localStorage.setItem(SCHEME_REVIEW_STORAGE_KEY, JSON.stringify(reviews));
+  } catch (e) {
+    console.warn('保存方案审核状态失败:', e);
+  }
+}
+
+export function updateSchemeReview(schemeId: string, status: SchemeReviewStatus, reviewer?: string, comment?: string): SchemeReview | null {
+  const reviews = loadSchemeReviews();
+  const existing = reviews.find(r => r.schemeId === schemeId);
+  if (existing) {
+    existing.status = status;
+    if (reviewer !== undefined) existing.reviewer = reviewer;
+    if (comment !== undefined) existing.comment = comment;
+    existing.reviewedAt = Date.now();
+    saveSchemeReviews(reviews);
+    return existing;
+  }
+  const review: SchemeReview = {
+    schemeId,
+    status,
+    reviewer,
+    comment,
+    reviewedAt: Date.now(),
+  };
+  reviews.push(review);
+  saveSchemeReviews(reviews);
+  return review;
+}
+
+export function getSchemeReview(schemeId: string): SchemeReview | null {
+  const reviews = loadSchemeReviews();
+  return reviews.find(r => r.schemeId === schemeId) || null;
+}
+
+export function filterArchiveRecords(records: ArchiveRecord[], filter: ArchiveFilter): ArchiveRecord[] {
+  let filtered = [...records];
+
+  if (filter.type !== 'all') {
+    filtered = filtered.filter(r => r.type === filter.type);
+  }
+
+  if (filter.searchQuery.trim()) {
+    const query = filter.searchQuery.toLowerCase();
+    filtered = filtered.filter(r =>
+      r.name.toLowerCase().includes(query) ||
+      (r.description && r.description.toLowerCase().includes(query)) ||
+      r.schemeNames.some(name => name.toLowerCase().includes(query))
+    );
+  }
+
+  if (filter.dateRange.start !== null) {
+    filtered = filtered.filter(r => r.createdAt >= filter.dateRange.start!);
+  }
+
+  if (filter.dateRange.end !== null) {
+    filtered = filtered.filter(r => r.createdAt <= filter.dateRange.end!);
+  }
+
+  return filtered;
 }

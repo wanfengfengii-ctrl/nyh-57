@@ -310,6 +310,72 @@ export const CUSTOM_RULE_OPERATOR_LABELS: Record<CustomRuleOperator, string> = {
   between: '介于之间',
 };
 
+export type IssueStatus = 'open' | 'resolved' | 'ignored';
+
+export interface IssueTracking {
+  issueId: string;
+  status: IssueStatus;
+  resolvedAt?: number;
+  resolvedBy?: string;
+  note?: string;
+}
+
+export type SchemeReviewStatus = 'pending' | 'approved' | 'rejected' | 'in_review';
+
+export interface SchemeReview {
+  schemeId: string;
+  status: SchemeReviewStatus;
+  reviewer?: string;
+  reviewedAt?: number;
+  comment?: string;
+}
+
+export interface SchemeGroup {
+  id: string;
+  name: string;
+  description?: string;
+  schemeIds: string[];
+  createdAt: number;
+  updatedAt: number;
+  color?: string;
+}
+
+export interface ArchiveFilter {
+  type: ArchiveItemType | 'all';
+  searchQuery: string;
+  dateRange: { start: number | null; end: number | null };
+}
+
+export const GROUP_STORAGE_KEY = 'zhusilan_scheme_groups';
+export const ISSUE_TRACKING_STORAGE_KEY = 'zhusilan_issue_tracking';
+export const SCHEME_REVIEW_STORAGE_KEY = 'zhusilan_scheme_review';
+export const MAX_GROUPS = 20;
+
+export const ISSUE_STATUS_LABELS: Record<IssueStatus, string> = {
+  open: '待处理',
+  resolved: '已解决',
+  ignored: '已忽略',
+};
+
+export const SCHEME_REVIEW_STATUS_LABELS: Record<SchemeReviewStatus, string> = {
+  pending: '待审核',
+  approved: '已通过',
+  rejected: '已驳回',
+  in_review: '审核中',
+};
+
+export const SCHEME_REVIEW_STATUS_COLORS: Record<SchemeReviewStatus, string> = {
+  pending: '#8B7355',
+  approved: '#18a058',
+  rejected: '#d03050',
+  in_review: '#2080f0',
+};
+
+export const GROUP_COLORS = [
+  '#C41E3A', '#2080F0', '#18a058', '#D48806', '#8B4513',
+  '#6B4C9A', '#2E624A', '#2E4A62', '#B8860B', '#556B2F',
+];
+
 export const ARCHIVE_TYPE_LABELS: Record<ArchiveItemType, string> = {
   comparison: '对比结果',
   audit: '审校报告',

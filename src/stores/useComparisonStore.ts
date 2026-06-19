@@ -20,6 +20,12 @@ import type {
   ArchiveStats,
   ArchiveItemType,
   AuditIssueNavigation,
+  SchemeGroup,
+  IssueTracking,
+  IssueStatus,
+  SchemeReview,
+  SchemeReviewStatus,
+  ArchiveFilter,
 } from '../types/comparison';
 import {
   MAX_COMPARE_SCHEMES,
@@ -48,6 +54,19 @@ import {
   deleteArchiveRecord as deleteArchiveRecordUtil,
   getArchiveStats,
   exportReportWithTemplate,
+  loadGroups,
+  addGroup as addGroupUtil,
+  updateGroup as updateGroupUtil,
+  deleteGroup as deleteGroupUtil,
+  addSchemeToGroup as addSchemeToGroupUtil,
+  removeSchemeFromGroup as removeSchemeFromGroupUtil,
+  loadIssueTrackings,
+  updateIssueTracking as updateIssueTrackingUtil,
+  getIssueTracking as getIssueTrackingUtil,
+  loadSchemeReviews,
+  updateSchemeReview as updateSchemeReviewUtil,
+  getSchemeReview as getSchemeReviewUtil,
+  filterArchiveRecords,
 } from '../utils/comparison';
 import { loadSchemes } from '../utils/export';
 
@@ -98,6 +117,22 @@ export const useComparisonStore = defineStore('comparison', () => {
   const focusedIssue = ref<AuditIssueNavigation | null>(null);
 
   const allSchemes = ref<SavedScheme[]>(loadSchemes());
+
+  const schemeGroups = ref<SchemeGroup[]>(loadGroups());
+
+  const activeGroupId = ref<string | 'all'>('all');
+
+  const issueTrackings = ref<IssueTracking[]>(loadIssueTrackings());
+
+  const schemeReviews = ref<SchemeReview[]>(loadSchemeReviews());
+
+  const archiveFilter = ref<ArchiveFilter>({
+    type: 'all',
+    searchQuery: '',
+    dateRange: { start: null, end: null },
+  });
+
+  const issueStatusFilter = ref<IssueStatus | 'all'>('all');
 
   const selectedSchemes = computed<SavedScheme[]>(() => {
     return allSchemes.value.filter(s => selectedSchemeIds.value.includes(s.id));
@@ -195,6 +230,46 @@ export const useComparisonStore = defineStore('comparison', () => {
     return getArchiveStats();
   });
 
+  const groupedSchemes = computed<SavedScheme[]>(() => {
+    if (activeGroupId.value === 'all') return allSchemes.value;
+    const group = schemeGroups.value.find(g => g.id === activeGroupId.value);
+    if (!group) return allSchemes.value;
+    return allSchemes.value.filter(s => group.schemeIds.includes(s.id));
+  });
+
+  const filteredArchiveRecords = computed<ArchiveRecord[]>(() => {
+    return filterArchiveRecords(archiveRecords.value, archiveFilter.value);
+  });
+
+  const filteredAuditIssuesWithStatus = computed(() => {
+    if (!auditResult.value) return [];
+    let issues = auditResult.value.issues;
+    if (auditFilter.value !== 'all') {
+      issues = issues.filter(i => i.severity === auditFilter.value);
+    }
+    if (issueStatusFilter.value !== 'all') {
+      issues = issues.filter(i => {
+        const tracking = issueTrackings.value.find(t => t.issueId === i.id);
+        const status = tracking?.status || 'open';
+        return status === issueStatusFilter.value;
+      });
+    }
+    return issues.map(i => {
+      const tracking = issueTrackings.value.find(t => t.issueId === i.id);
+      return {
+        ...i,
+        trackingStatus: tracking?.status || 'open' as IssueStatus,
+        trackingNote: tracking?.note || '',
+        resolvedAt: tracking?.resolvedAt,
+      };
+    });
+  });
+
+  function getSchemeReviewStatus(schemeId: string): SchemeReviewStatus {
+    const review = schemeReviews.value.find(r => r.schemeId === schemeId);
+    return review?.status || 'pending';
+  }
+
   function refreshSchemes(): void {
     allSchemes.value = loadSchemes();
     const validIds = selectedSchemeIds.value.filter(id =>
@@ -250,6 +325,9 @@ export const useComparisonStore = defineStore('comparison', () => {
     refreshSnapshots();
     refreshArchiveRecords();
     refreshCustomRules();
+    refreshGroups();
+    refreshIssueTrackings();
+    refreshSchemeReviews();
   }
 
   function closePanel(): void {
@@ -507,6 +585,113 @@ export const useComparisonStore = defineStore('comparison', () => {
     archiveExportRecord(format, selectedSchemes.value.length);
   }
 
+  function refreshGroups(): void {
+    schemeGroups.value = loadGroups();
+  }
+
+  function createGroup(name: string, description?: string, color?: string): SchemeGroup | null {
+    const result = addGroupUtil(name, description, color);
+    if (result) {
+      schemeGroups.value = loadGroups();
+    }
+    return result;
+  }
+
+  function editGroup(id: string, updates: Partial<SchemeGroup>): boolean {
+    const result = updateGroupUtil(id, updates);
+    if (result) {
+      schemeGroups.value = loadGroups();
+    }
+    return result;
+  }
+
+  function removeGroup(id: string): boolean {
+    const result = deleteGroupUtil(id);
+    if (result) {
+      schemeGroups.value = loadGroups();
+      if (activeGroupId.value === id) {
+        activeGroupId.value = 'all';
+      }
+    }
+    return result;
+  }
+
+  function setActiveGroup(groupId: string | 'all'): void {
+    activeGroupId.value = groupId;
+  }
+
+  function addSchemeToGroup(groupId: string, schemeId: string): boolean {
+    const result = addSchemeToGroupUtil(groupId, schemeId);
+    if (result) {
+      schemeGroups.value = loadGroups();
+    }
+    return result;
+  }
+
+  function removeSchemeFromGroup(groupId: string, schemeId: string): boolean {
+    const result = removeSchemeFromGroupUtil(groupId, schemeId);
+    if (result) {
+      schemeGroups.value = loadGroups();
+    }
+    return result;
+  }
+
+  function selectAllSchemesInGroup(groupId: string): void {
+    const group = schemeGroups.value.find(g => g.id === groupId);
+    if (!group) return;
+    for (const schemeId of group.schemeIds) {
+      if (!selectedSchemeIds.value.includes(schemeId) && selectedSchemeIds.value.length < MAX_COMPARE_SCHEMES) {
+        selectedSchemeIds.value.push(schemeId);
+      }
+    }
+    saveSelectedIds([...selectedSchemeIds.value]);
+  }
+
+  function refreshIssueTrackings(): void {
+    issueTrackings.value = loadIssueTrackings();
+  }
+
+  function setIssueStatus(issueId: string, status: IssueStatus, note?: string): IssueTracking | null {
+    const result = updateIssueTrackingUtil(issueId, status, note);
+    if (result) {
+      issueTrackings.value = loadIssueTrackings();
+    }
+    return result;
+  }
+
+  function getIssueTrackingStatus(issueId: string): IssueStatus {
+    const tracking = issueTrackings.value.find(t => t.issueId === issueId);
+    return tracking?.status || 'open';
+  }
+
+  function setIssueStatusFilter(filter: IssueStatus | 'all'): void {
+    issueStatusFilter.value = filter;
+  }
+
+  function refreshSchemeReviews(): void {
+    schemeReviews.value = loadSchemeReviews();
+  }
+
+  function setSchemeReviewStatus(schemeId: string, status: SchemeReviewStatus, reviewer?: string, comment?: string): SchemeReview | null {
+    const result = updateSchemeReviewUtil(schemeId, status, reviewer, comment);
+    if (result) {
+      schemeReviews.value = loadSchemeReviews();
+    }
+    return result;
+  }
+
+  function setArchiveFilter(filter: Partial<ArchiveFilter>): void {
+    archiveFilter.value = { ...archiveFilter.value, ...filter };
+  }
+
+  function resetArchiveFilter(): void {
+    archiveFilter.value = {
+      type: 'all',
+      searchQuery: '',
+      dateRange: { start: null, end: null },
+    };
+  }
+
   watch(
     selectedSchemeIds,
     () => {
@@ -540,6 +725,16 @@ export const useComparisonStore = defineStore('comparison', () => {
     archiveRecords,
     archiveStats,
     focusedIssue,
+    schemeGroups,
+    activeGroupId,
+    issueTrackings,
+    schemeReviews,
+    archiveFilter,
+    issueStatusFilter,
+    groupedSchemes,
+    filteredArchiveRecords,
+    filteredAuditIssuesWithStatus,
+    getSchemeReviewStatus,
     refreshSchemes,
     toggleScheme,
     addScheme,
@@ -580,5 +775,21 @@ export const useComparisonStore = defineStore('comparison', () => {
     exportComparisonReport,
     exportReportWithCurrentTemplate,
     batchExport,
+    refreshGroups,
+    createGroup,
+    editGroup,
+    removeGroup,
+    setActiveGroup,
+    addSchemeToGroup,
+    removeSchemeFromGroup,
+    selectAllSchemesInGroup,
+    refreshIssueTrackings,
+    setIssueStatus,
+    getIssueTrackingStatus,
+    setIssueStatusFilter,
+    refreshSchemeReviews,
+    setSchemeReviewStatus,
+    setArchiveFilter,
+    resetArchiveFilter,
   };
 });

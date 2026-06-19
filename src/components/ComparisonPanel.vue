@@ -32,6 +32,9 @@ import {
   NRadio,
   NRadioGroup,
   NSwitch,
+  NDatePicker,
+  NPagination,
+  NTooltip,
 } from 'naive-ui';
 import {
   CloseOutline,
@@ -57,6 +60,11 @@ import {
   CopyOutline,
   PlayOutline,
   PauseOutline,
+  FolderOutline,
+  FolderOpenOutline,
+  CheckmarkDoneOutline,
+  SearchOutline,
+  FilterOutline,
 } from '@vicons/ionicons5';
 import type { SavedScheme } from '../types/layout';
 import type {
@@ -70,6 +78,9 @@ import type {
   CustomRuleField,
   CustomRuleOperator,
   DiffItem,
+  IssueStatus,
+  SchemeReviewStatus,
+  ArchiveItemType,
 } from '../types/comparison';
 import {
   DIFF_CATEGORY_LABELS,
@@ -82,6 +93,10 @@ import {
   CUSTOM_RULE_OPERATOR_LABELS,
   ARCHIVE_TYPE_LABELS,
   SEVERITY_ORDER,
+  ISSUE_STATUS_LABELS,
+  SCHEME_REVIEW_STATUS_LABELS,
+  SCHEME_REVIEW_STATUS_COLORS,
+  GROUP_COLORS,
 } from '../types/comparison';
 
 const comparisonStore = useComparisonStore();
@@ -90,14 +105,6 @@ const message = useMessage();
 const dialog = useDialog();
 
 const searchQuery = ref('');
-
-const filteredAllSchemes = computed(() => {
-  if (!searchQuery.value.trim()) return comparisonStore.allSchemes;
-  const query = searchQuery.value.toLowerCase();
-  return comparisonStore.allSchemes.filter(s =>
-    s.name.toLowerCase().includes(query)
-  );
-});
 
 const categoryOptions = [
   { label: '全部分类', value: 'all' },
@@ -514,6 +521,188 @@ function handleTemplateChange(templateId: ReportTemplate): void {
 function isSeveritySelected(severity: DiffSeverity): boolean {
   return comparisonStore.severityFilter.includes(severity);
 }
+
+const showGroupDialog = ref(false);
+const newGroupName = ref('');
+const newGroupDesc = ref('');
+const newGroupColor = ref(GROUP_COLORS[0]);
+
+const showAssignGroupDialog = ref(false);
+const assignGroupSchemeId = ref<string | null>(null);
+
+const showReviewDialog = ref(false);
+const reviewSchemeId = ref<string | null>(null);
+const reviewForm = ref({
+  status: 'approved' as SchemeReviewStatus,
+  reviewer: '',
+  comment: '',
+});
+
+const issueStatusFilterOptions: { label: string; value: IssueStatus | 'all' }[] = [
+  { label: '全部状态', value: 'all' },
+  { label: '待处理', value: 'open' },
+  { label: '已解决', value: 'resolved' },
+  { label: '已忽略', value: 'ignored' },
+];
+
+const archiveTypeFilterOptions = [
+  { label: '全部类型', value: 'all' },
+  ...Object.entries(ARCHIVE_TYPE_LABELS).map(([value, label]) => ({
+    label,
+    value,
+  })),
+];
+
+const groupOptions = computed(() => [
+  { label: '全部分组', value: 'all' },
+  ...comparisonStore.schemeGroups.map(g => ({
+    label: `${g.name} (${g.schemeIds.length})`,
+    value: g.id,
+  })),
+]);
+
+const filteredSchemesByGroup = computed(() => {
+  return comparisonStore.groupedSchemes;
+});
+
+const searchedSchemes = computed(() => {
+  const schemes = filteredSchemesByGroup.value;
+  if (!searchQuery.value.trim()) return schemes;
+  const query = searchQuery.value.toLowerCase();
+  return schemes.filter(s =>
+    s.name.toLowerCase().includes(query)
+  );
+});
+
+function handleCreateGroup(): void {
+  if (!newGroupName.value.trim()) {
+    message.warning('请输入分组名称');
+    return;
+  }
+  const result = comparisonStore.createGroup(
+    newGroupName.value.trim(),
+    newGroupDesc.value.trim() || undefined,
+    newGroupColor.value
+  );
+  if (result) {
+    message.success('分组创建成功');
+    showGroupDialog.value = false;
+    newGroupName.value = '';
+    newGroupDesc.value = '';
+    newGroupColor.value = GROUP_COLORS[0];
+  } else {
+    message.error('分组创建失败');
+  }
+}
+
+function handleDeleteGroup(groupId: string): void {
+  dialog.warning({
+    title: '确认删除',
+    content: '删除分组不会删除方案，是否继续？',
+    positiveText: '确定删除',
+    negativeText: '取消',
+    onPositiveClick: () => {
+      const ok = comparisonStore.removeGroup(groupId);
+      if (ok) {
+        message.success('分组已删除');
+      }
+    },
+  });
+}
+
+function handleSelectGroup(groupId: string | 'all'): void {
+  comparisonStore.setActiveGroup(groupId);
+}
+
+function handleSelectAllInGroup(groupId: string): void {
+  comparisonStore.selectAllSchemesInGroup(groupId);
+  message.info('已选中分组内方案');
+}
+
+function handleAssignGroup(schemeId: string): void {
+  assignGroupSchemeId.value = schemeId;
+  showAssignGroupDialog.value = true;
+}
+
+function handleAddToGroup(groupId: string): void {
+  if (!assignGroupSchemeId.value) return;
+  const ok = comparisonStore.addSchemeToGroup(groupId, assignGroupSchemeId.value);
+  if (ok) {
+    message.success('已添加到分组');
+    showAssignGroupDialog.value = false;
+  } else {
+    message.warning('该方案已在分组中');
+  }
+}
+
+function handleRemoveFromGroup(groupId: string, schemeId: string): void {
+  const ok = comparisonStore.removeSchemeFromGroup(groupId, schemeId);
+  if (ok) {
+    message.success('已从分组移除');
+  }
+}
+
+function handleIssueStatusChange(issueId: string, status: IssueStatus): void {
+  comparisonStore.setIssueStatus(issueId, status);
+  message.success(`问题已标记为${ISSUE_STATUS_LABELS[status]}`);
+}
+
+function handleIssueStatusFilterChange(filter: IssueStatus | 'all'): void {
+  comparisonStore.setIssueStatusFilter(filter);
+}
+
+function handleReviewScheme(schemeId: string): void {
+  reviewSchemeId.value = schemeId;
+  const currentStatus = comparisonStore.getSchemeReviewStatus(schemeId);
+  reviewForm.value = {
+    status: currentStatus,
+    reviewer: '',
+    comment: '',
+  };
+  showReviewDialog.value = true;
+}
+
+function handleSaveReview(): void {
+  if (!reviewSchemeId.value) return;
+  comparisonStore.setSchemeReviewStatus(
+    reviewSchemeId.value,
+    reviewForm.value.status,
+    reviewForm.value.reviewer.trim() || undefined,
+    reviewForm.value.comment.trim() || undefined
+  );
+  message.success('审核状态已更新');
+  showReviewDialog.value = false;
+}
+
+function handleArchiveSearch(query: string): void {
+  comparisonStore.setArchiveFilter({ searchQuery: query });
+}
+
+function handleArchiveTypeFilter(type: ArchiveItemType | 'all'): void {
+  comparisonStore.setArchiveFilter({ type });
+}
+
+function handleArchiveDateRangeChange(range: [number, number] | null): void {
+  if (range) {
+    comparisonStore.setArchiveFilter({
+      dateRange: { start: range[0], end: range[1] },
+    });
+  } else {
+    comparisonStore.setArchiveFilter({
+      dateRange: { start: null, end: null },
+    });
+  }
+}
+
+function handleResetArchiveFilter(): void {
+  comparisonStore.resetArchiveFilter();
+}
+
+function getSchemeGroupNames(schemeId: string): string[] {
+  return comparisonStore.schemeGroups
+    .filter(g => g.schemeIds.includes(schemeId))
+    .map(g => g.name);
+}
 </script>
 
 <template>
@@ -548,8 +737,14 @@ function isSeveritySelected(severity: DiffSeverity): boolean {
                 placeholder="搜索方案..."
                 size="small"
                 clearable
-                style="width: 200px"
+                style="width: 160px"
               />
+              <n-button size="small" quaternary @click="showGroupDialog = true">
+                <template #icon>
+                  <add-outline />
+                </template>
+                新建分组
+              </n-button>
               <n-button
                 v-if="comparisonStore.selectedSchemeIds.length > 0"
                 size="small"
@@ -564,11 +759,51 @@ function isSeveritySelected(severity: DiffSeverity): boolean {
             </div>
           </div>
 
+          <div class="group-filter-bar">
+            <n-select
+              :value="comparisonStore.activeGroupId"
+              :options="groupOptions"
+              size="small"
+              style="width: 160px"
+              @update:value="handleSelectGroup"
+            />
+            <div v-if="comparisonStore.activeGroupId !== 'all'" class="group-actions">
+              <n-button size="tiny" type="primary" quaternary @click="handleSelectAllInGroup(comparisonStore.activeGroupId)">
+                全选此分组
+              </n-button>
+              <n-button size="tiny" type="error" quaternary @click="handleDeleteGroup(comparisonStore.activeGroupId)">
+                删除分组
+              </n-button>
+            </div>
+          </div>
+
+          <div v-if="comparisonStore.schemeGroups.length > 0" class="group-tabs">
+            <n-space size="small">
+              <n-tag
+                :type="comparisonStore.activeGroupId === 'all' ? 'primary' : 'default'"
+                class="group-tab"
+                @click="handleSelectGroup('all')"
+              >
+                全部
+              </n-tag>
+              <n-tag
+                v-for="group in comparisonStore.schemeGroups"
+                :key="group.id"
+                :type="comparisonStore.activeGroupId === group.id ? 'primary' : 'default'"
+                :color="comparisonStore.activeGroupId === group.id ? { color: group.color || '#C41E3A', textColor: '#fff' } : undefined"
+                class="group-tab"
+                @click="handleSelectGroup(group.id)"
+              >
+                {{ group.name }} ({{ group.schemeIds.length }})
+              </n-tag>
+            </n-space>
+          </div>
+
           <div class="scheme-list">
             <n-scrollbar>
               <n-list hoverable clickable>
                 <n-list-item
-                  v-for="scheme in filteredAllSchemes"
+                  v-for="scheme in searchedSchemes"
                   :key="scheme.id"
                   :class="{ selected: comparisonStore.isSelected(scheme.id) }"
                   @click="handleToggleScheme(scheme.id)"
@@ -577,26 +812,65 @@ function isSeveritySelected(severity: DiffSeverity): boolean {
                     <n-checkbox :checked="comparisonStore.isSelected(scheme.id)" />
                   </template>
                   <div class="scheme-item">
-                    <div class="scheme-name">{{ scheme.name }}</div>
+                    <div class="scheme-name-row">
+                      <span class="scheme-name">{{ scheme.name }}</span>
+                      <n-tag
+                        size="tiny"
+                        :color="{ color: SCHEME_REVIEW_STATUS_COLORS[comparisonStore.getSchemeReviewStatus(scheme.id)], textColor: '#fff' }"
+                        class="review-badge"
+                      >
+                        {{ SCHEME_REVIEW_STATUS_LABELS[comparisonStore.getSchemeReviewStatus(scheme.id)] }}
+                      </n-tag>
+                    </div>
                     <div class="scheme-meta">
                       {{ scheme.params.paperWidth }}×{{ scheme.params.paperHeight }}mm ·
                       {{ scheme.params.columnCount }}栏×{{ scheme.params.rowCount }}行
                     </div>
+                    <div v-if="getSchemeGroupNames(scheme.id).length > 0" class="scheme-groups">
+                      <n-tag
+                        v-for="gName in getSchemeGroupNames(scheme.id)"
+                        :key="gName"
+                        size="tiny"
+                        type="info"
+                      >
+                        {{ gName }}
+                      </n-tag>
+                    </div>
                   </div>
                   <template #suffix>
-                    <n-button
-                      size="tiny"
-                      type="primary"
-                      quaternary
-                      @click.stop="handleApplyScheme(scheme)"
-                    >
-                      应用
-                    </n-button>
+                    <n-space :size="4">
+                      <n-button
+                        size="tiny"
+                        quaternary
+                        @click.stop="handleAssignGroup(scheme.id)"
+                      >
+                        <template #icon>
+                          <folder-outline />
+                        </template>
+                      </n-button>
+                      <n-button
+                        size="tiny"
+                        quaternary
+                        @click.stop="handleReviewScheme(scheme.id)"
+                      >
+                        <template #icon>
+                          <checkmark-done-outline />
+                        </template>
+                      </n-button>
+                      <n-button
+                        size="tiny"
+                        type="primary"
+                        quaternary
+                        @click.stop="handleApplyScheme(scheme)"
+                      >
+                        应用
+                      </n-button>
+                    </n-space>
                   </template>
                 </n-list-item>
               </n-list>
               <n-empty
-                v-if="filteredAllSchemes.length === 0"
+                v-if="searchedSchemes.length === 0"
                 description="暂无方案，请先保存方案"
                 size="small"
               />
@@ -780,8 +1054,15 @@ function isSeveritySelected(severity: DiffSeverity): boolean {
                     v-model:value="comparisonStore.auditFilter"
                     :options="auditFilterOptions"
                     size="small"
-                    style="width: 140px"
+                    style="width: 120px"
                     @update:value="(v: any) => comparisonStore.setAuditFilter(v)"
+                  />
+                  <n-select
+                    :value="comparisonStore.issueStatusFilter"
+                    :options="issueStatusFilterOptions"
+                    size="small"
+                    style="width: 120px"
+                    @update:value="(v: any) => handleIssueStatusFilterChange(v)"
                   />
                 </div>
                 <div class="toolbar-right">
@@ -850,16 +1131,23 @@ function isSeveritySelected(severity: DiffSeverity): boolean {
 
               <div class="audit-issues-wrapper">
                 <n-scrollbar>
-                  <div v-if="comparisonStore.filteredAuditIssues.length > 0" class="audit-issues">
+                  <div v-if="comparisonStore.filteredAuditIssuesWithStatus.length > 0" class="audit-issues">
                     <div
-                      v-for="issue in comparisonStore.filteredAuditIssues"
+                      v-for="issue in comparisonStore.filteredAuditIssuesWithStatus"
                       :key="issue.id"
                       class="audit-issue-item"
-                      :class="`severity-${issue.severity}`"
+                      :class="[`severity-${issue.severity}`, `status-${issue.trackingStatus}`]"
                     >
                       <div class="issue-header">
                         <n-tag :type="severityColors[issue.severity as DiffSeverity]" size="small">
                           {{ AUDIT_ISSUE_TYPE_LABELS[issue.type] }}
+                        </n-tag>
+                        <n-tag
+                          size="tiny"
+                          :type="issue.trackingStatus === 'resolved' ? 'success' : issue.trackingStatus === 'ignored' ? 'default' : 'warning'"
+                          class="tracking-badge"
+                        >
+                          {{ ISSUE_STATUS_LABELS[issue.trackingStatus] }}
                         </n-tag>
                         <span class="issue-scheme">{{ issue.schemeName }}</span>
                         <span class="issue-field">{{ issue.fieldLabel }}</span>
@@ -871,12 +1159,32 @@ function isSeveritySelected(severity: DiffSeverity): boolean {
                             </template>
                             定位
                           </n-button>
+                          <n-dropdown
+                            trigger="click"
+                            :options="[
+                              { label: '标记待处理', key: 'open' },
+                              { label: '标记已解决', key: 'resolved' },
+                              { label: '标记已忽略', key: 'ignored' },
+                            ]"
+                            @select="(key: string) => handleIssueStatusChange(issue.id, key as IssueStatus)"
+                          >
+                            <n-button size="tiny" quaternary>
+                              <template #icon>
+                                <checkmark-done-outline />
+                              </template>
+                              状态
+                            </n-button>
+                          </n-dropdown>
                         </div>
                       </div>
                       <div class="issue-message">{{ issue.message }}</div>
                       <div v-if="issue.suggestion" class="issue-suggestion">
                         <span class="suggestion-label">建议：</span>
                         {{ issue.suggestion }}
+                      </div>
+                      <div v-if="issue.trackingNote" class="issue-tracking-note">
+                        <span class="tracking-note-label">备注：</span>
+                        {{ issue.trackingNote }}
                       </div>
                     </div>
                   </div>
@@ -1055,6 +1363,41 @@ function isSeveritySelected(severity: DiffSeverity): boolean {
                   <div class="section-title">归档记录</div>
                 </div>
 
+                <div class="archive-search-bar">
+                  <n-input
+                    :value="comparisonStore.archiveFilter.searchQuery"
+                    placeholder="搜索归档记录..."
+                    size="small"
+                    clearable
+                    @update:value="handleArchiveSearch"
+                  >
+                    <template #prefix>
+                      <search-outline />
+                    </template>
+                  </n-input>
+                  <n-select
+                    :value="comparisonStore.archiveFilter.type"
+                    :options="archiveTypeFilterOptions"
+                    size="small"
+                    style="width: 130px; flex-shrink: 0"
+                    @update:value="handleArchiveTypeFilter"
+                  />
+                  <n-date-picker
+                    type="daterange"
+                    size="small"
+                    clearable
+                    placeholder="选择日期范围"
+                    style="width: 240px; flex-shrink: 0"
+                    @update:value="handleArchiveDateRangeChange"
+                  />
+                  <n-button size="small" quaternary @click="handleResetArchiveFilter">
+                    <template #icon>
+                      <filter-outline />
+                    </template>
+                    重置
+                  </n-button>
+                </div>
+
                 <div class="archive-stats">
                   <n-grid :cols="5" :x-gap="8" :y-gap="8">
                     <n-grid-item>
@@ -1075,11 +1418,11 @@ function isSeveritySelected(severity: DiffSeverity): boolean {
                   </n-grid>
                 </div>
 
-                <div v-if="comparisonStore.archiveRecords.length > 0" class="archive-list">
+                <div v-if="comparisonStore.filteredArchiveRecords.length > 0" class="archive-list">
                   <n-scrollbar>
                     <n-list hoverable>
                       <n-list-item
-                        v-for="record in comparisonStore.archiveRecords"
+                        v-for="record in comparisonStore.filteredArchiveRecords"
                         :key="record.id"
                         class="archive-item"
                       >
@@ -1125,7 +1468,7 @@ function isSeveritySelected(severity: DiffSeverity): boolean {
                     </n-list>
                   </n-scrollbar>
                 </div>
-                <n-empty v-else description="暂无归档记录，对比结果和导出记录将自动归档" />
+                <n-empty v-else description="暂无匹配的归档记录" />
               </div>
             </n-tab-pane>
 
@@ -1290,6 +1633,97 @@ function isSeveritySelected(severity: DiffSeverity): boolean {
         </n-form-item>
         <n-form-item label="启用状态">
           <n-switch v-model:value="ruleForm.enabled" />
+        </n-form-item>
+      </n-form>
+    </n-modal>
+
+    <n-modal
+      v-model:show="showGroupDialog"
+      preset="dialog"
+      title="新建方案分组"
+      positive-text="创建"
+      negative-text="取消"
+      @positive-click="handleCreateGroup"
+    >
+      <n-form>
+        <n-form-item label="分组名称" required>
+          <n-input v-model:value="newGroupName" placeholder="请输入分组名称" />
+        </n-form-item>
+        <n-form-item label="分组描述">
+          <n-input
+            v-model:value="newGroupDesc"
+            type="textarea"
+            placeholder="可选：添加分组描述"
+            :autosize="{ minRows: 2, maxRows: 3 }"
+          />
+        </n-form-item>
+        <n-form-item label="分组颜色">
+          <n-space>
+            <div
+              v-for="color in GROUP_COLORS"
+              :key="color"
+              class="color-option"
+              :class="{ active: newGroupColor === color }"
+              :style="{ background: color }"
+              @click="newGroupColor = color"
+            />
+          </n-space>
+        </n-form-item>
+      </n-form>
+    </n-modal>
+
+    <n-modal
+      v-model:show="showAssignGroupDialog"
+      preset="dialog"
+      title="分配到分组"
+      positive-text="确定"
+      negative-text="取消"
+      :show-icon="false"
+    >
+      <div class="assign-group-list">
+        <n-empty v-if="comparisonStore.schemeGroups.length === 0" description="暂无分组，请先创建分组" />
+        <div
+          v-for="group in comparisonStore.schemeGroups"
+          :key="group.id"
+          class="assign-group-item"
+          @click="handleAddToGroup(group.id)"
+        >
+          <div class="assign-group-color" :style="{ background: group.color || '#8B7355' }" />
+          <div class="assign-group-info">
+            <div class="assign-group-name">{{ group.name }}</div>
+            <div class="assign-group-count">{{ group.schemeIds.length }} 套方案</div>
+          </div>
+        </div>
+      </div>
+    </n-modal>
+
+    <n-modal
+      v-model:show="showReviewDialog"
+      preset="dialog"
+      title="方案审核"
+      positive-text="保存"
+      negative-text="取消"
+      @positive-click="handleSaveReview"
+    >
+      <n-form>
+        <n-form-item label="审核状态" required>
+          <n-radio-group v-model:value="reviewForm.status">
+            <n-radio value="pending">待审核</n-radio>
+            <n-radio value="in_review">审核中</n-radio>
+            <n-radio value="approved">已通过</n-radio>
+            <n-radio value="rejected">已驳回</n-radio>
+          </n-radio-group>
+        </n-form-item>
+        <n-form-item label="审核人">
+          <n-input v-model:value="reviewForm.reviewer" placeholder="可选：输入审核人" />
+        </n-form-item>
+        <n-form-item label="审核意见">
+          <n-input
+            v-model:value="reviewForm.comment"
+            type="textarea"
+            placeholder="可选：输入审核意见"
+            :autosize="{ minRows: 2, maxRows: 4 }"
+          />
         </n-form-item>
       </n-form>
     </n-modal>
@@ -1863,5 +2297,149 @@ function isSeveritySelected(severity: DiffSeverity): boolean {
 
 :deep(.n-statistic-value) {
   font-size: 20px !important;
+}
+
+.group-filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.group-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.group-tabs {
+  margin-bottom: 8px;
+  overflow-x: auto;
+}
+
+.group-tab {
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.2s;
+}
+
+.group-tab:hover {
+  opacity: 0.8;
+}
+
+.scheme-name-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.review-badge {
+  font-size: 10px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.scheme-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.tracking-badge {
+  flex-shrink: 0;
+}
+
+.audit-issue-item.status-resolved {
+  opacity: 0.7;
+}
+
+.audit-issue-item.status-ignored {
+  opacity: 0.4;
+}
+
+.issue-tracking-note {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px dashed #B8D4A0;
+  color: #4A6B3D;
+  font-size: 12px;
+}
+
+.tracking-note-label {
+  font-weight: 600;
+}
+
+.archive-search-bar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #E8DFCC;
+}
+
+.color-option {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: all 0.2s;
+}
+
+.color-option:hover {
+  transform: scale(1.2);
+}
+
+.color-option.active {
+  border-color: #3D2914;
+  box-shadow: 0 0 0 2px #FAF5EB, 0 0 0 4px #3D2914;
+}
+
+.assign-group-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.assign-group-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid #E8DFCC;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+  background: #FAF5EB;
+}
+
+.assign-group-item:hover {
+  border-color: #C41E3A;
+  background: rgba(196, 30, 58, 0.05);
+}
+
+.assign-group-color {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.assign-group-info {
+  flex: 1;
+}
+
+.assign-group-name {
+  font-weight: 600;
+  color: #3D2914;
+  font-size: 14px;
+}
+
+.assign-group-count {
+  font-size: 12px;
+  color: #8B7355;
 }
 </style>
