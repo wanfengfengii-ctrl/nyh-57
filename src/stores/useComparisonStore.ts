@@ -94,8 +94,8 @@ export const useComparisonStore = defineStore('comparison', () => {
       allSchemes.value.some(s => s.id === id)
     );
     if (validIds.length !== selectedSchemeIds.value.length) {
-      selectedSchemeIds.value = validIds;
-      saveSelectedIds(validIds);
+      selectedSchemeIds.value.splice(0, selectedSchemeIds.value.length, ...validIds);
+      saveSelectedIds([...validIds]);
     }
   }
 
@@ -129,7 +129,7 @@ export const useComparisonStore = defineStore('comparison', () => {
   }
 
   function clearAll(): void {
-    selectedSchemeIds.value = [];
+    selectedSchemeIds.value.splice(0, selectedSchemeIds.value.length);
     saveSelectedIds([]);
   }
 

@@ -666,9 +666,69 @@ export function generateReportJson(
   return JSON.stringify(report, null, 2);
 }
 
-export function generateReportCsv(schemes: SavedScheme[], audit: AuditResult): string {
-  const headers = ['方案名称', '问题类型', '严重程度', '分类', '字段', '值', '问题描述', '建议'];
-  const lines: string[] = [headers.join(',')];
+export function generateReportCsv(
+  schemes: SavedScheme[],
+  comparison: ComparisonResult,
+  audit: AuditResult
+): string {
+  const lines: string[] = [];
+
+  lines.push('【方案详情】');
+  const schemeHeaders = [
+    '序号', '方案名称', '创建时间', '更新时间',
+    '纸张宽度(mm)', '纸张高度(mm)',
+    '上边距(mm)', '下边距(mm)', '左边距(mm)', '右边距(mm)',
+    '栏数', '行数',
+    '栏线粗细(mm)', '栏线颜色',
+    '鱼尾样式',
+    '批注区位置', '批注区宽度(mm)',
+  ];
+  lines.push(schemeHeaders.join(','));
+
+  for (let i = 0; i < schemes.length; i++) {
+    const s = schemes[i];
+    const line = [
+      String(i + 1),
+      `"${s.name.replace(/"/g, '""')}"`,
+      `"${new Date(s.createdAt).toLocaleString('zh-CN')}"`,
+      `"${new Date(s.updatedAt).toLocaleString('zh-CN')}"`,
+      String(s.params.paperWidth),
+      String(s.params.paperHeight),
+      String(s.params.marginTop),
+      String(s.params.marginBottom),
+      String(s.params.marginLeft),
+      String(s.params.marginRight),
+      String(s.params.columnCount),
+      String(s.params.rowCount),
+      String(s.params.lineThickness),
+      s.params.lineColor,
+      `"${fishtailLabelMap[s.params.fishtailStyle] || s.params.fishtailStyle}"`,
+      `"${annotationPositionLabelMap[s.params.annotationPosition] || s.params.annotationPosition}"`,
+      String(s.params.annotationWidth),
+    ];
+    lines.push(line.join(','));
+  }
+
+  lines.push('');
+  lines.push('【参数对比差异】');
+  const diffHeaders = ['分类', '参数项', ...comparison.schemes.map(s => s.schemeName.replace(/"/g, '""'))];
+  lines.push(diffHeaders.map(h => `"${h}"`).join(','));
+
+  for (const item of comparison.diffItems) {
+    if (item.hasDiff) {
+      const line = [
+        `"${DIFF_CATEGORY_LABELS[item.category]}"`,
+        `"${item.label}"`,
+        ...item.values.map(v => `"${v.replace(/"/g, '""')}"`),
+      ];
+      lines.push(line.join(','));
+    }
+  }
+
+  lines.push('');
+  lines.push('【审校问题】');
+  const auditHeaders = ['方案名称', '问题类型', '严重程度', '分类', '字段', '值', '问题描述', '建议'];
+  lines.push(auditHeaders.join(','));
 
   for (const issue of audit.issues) {
     const line = [
@@ -812,7 +872,7 @@ export function exportReport(
       extension = 'json';
       break;
     case 'csv':
-      content = generateReportCsv(schemes, audit);
+      content = generateReportCsv(schemes, comparison, audit);
       mimeType = 'text/csv;charset=utf-8';
       extension = 'csv';
       break;

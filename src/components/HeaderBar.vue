@@ -203,6 +203,7 @@ function confirmSaveScheme(): void {
   if (result) {
     message.success('方案已保存');
     showSaveSchemeDialog.value = false;
+    comparisonStore.refreshSchemes();
   } else {
     message.error('保存失败');
   }
@@ -231,7 +232,10 @@ function handleUpdateScheme(id: string): void {
     negativeText: '取消',
     onPositiveClick: () => {
       const ok = store.updateCurrentScheme(id);
-      if (ok) message.success('方案已更新');
+      if (ok) {
+        message.success('方案已更新');
+        comparisonStore.refreshSchemes();
+      }
     },
   });
 }
@@ -251,6 +255,7 @@ function confirmRenameScheme(): void {
   const ok = store.renameExistingScheme(editingSchemeId.value, newName);
   if (ok) {
     message.success('方案已重命名');
+    comparisonStore.refreshSchemes();
   } else {
     message.error('重命名失败');
   }
@@ -273,7 +278,10 @@ function handleRemoveScheme(id: string): void {
     type: 'error',
     onPositiveClick: () => {
       const ok = store.removeScheme(id);
-      if (ok) message.success('方案已删除');
+      if (ok) {
+        message.success('方案已删除');
+        comparisonStore.refreshSchemes();
+      }
     },
   });
 }
