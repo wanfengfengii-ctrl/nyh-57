@@ -60,8 +60,15 @@ export const useLayoutStore = defineStore('layout', () => {
   }
 
   function setPaperSize(width: number, height: number): void {
-    updateParam('paperWidth', width);
-    updateParam('paperHeight', height);
+    const tempParams = { ...params.value, paperWidth: width, paperHeight: height };
+    const result = validateLayoutParams(tempParams);
+    if (result.valid) {
+      params.value = tempParams;
+      validation.value = result;
+      saveToLocalStorage(params.value);
+    } else {
+      validation.value = result;
+    }
   }
 
   function setMargins(top: number, bottom: number, left: number, right: number): void {
@@ -77,13 +84,27 @@ export const useLayoutStore = defineStore('layout', () => {
   }
 
   function setGrid(columns: number, rows: number): void {
-    updateParam('columnCount', columns);
-    updateParam('rowCount', rows);
+    const tempParams = { ...params.value, columnCount: columns, rowCount: rows };
+    const result = validateLayoutParams(tempParams);
+    if (result.valid) {
+      params.value = tempParams;
+      validation.value = result;
+      saveToLocalStorage(params.value);
+    } else {
+      validation.value = result;
+    }
   }
 
   function setLineStyle(thickness: number, color: string): void {
-    updateParam('lineThickness', thickness);
-    updateParam('lineColor', color);
+    const tempParams = { ...params.value, lineThickness: thickness, lineColor: color };
+    const result = validateLayoutParams(tempParams);
+    if (result.valid) {
+      params.value = tempParams;
+      validation.value = result;
+      saveToLocalStorage(params.value);
+    } else {
+      validation.value = result;
+    }
   }
 
   function setFishtailStyle(style: FishtailType): void {
@@ -91,8 +112,15 @@ export const useLayoutStore = defineStore('layout', () => {
   }
 
   function setAnnotation(width: number, position: AnnotationPosition): void {
-    updateParam('annotationWidth', width);
-    updateParam('annotationPosition', position);
+    const tempParams = { ...params.value, annotationWidth: width, annotationPosition: position };
+    const result = validateLayoutParams(tempParams);
+    if (result.valid) {
+      params.value = tempParams;
+      validation.value = result;
+      saveToLocalStorage(params.value);
+    } else {
+      validation.value = result;
+    }
   }
 
   function validate(): ValidationResult {

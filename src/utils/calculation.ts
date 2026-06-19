@@ -25,10 +25,12 @@ export function calculateLayoutStats(params: LayoutParams): LayoutStats {
   const overlapArea = verticalLineCount * horizontalLineCount * params.lineThickness * params.lineThickness;
   const lineArea = verticalLineArea + horizontalLineArea - overlapArea;
 
-  const writingArea = bodyWidth * printHeight - lineArea + overlapArea;
+  const bodyArea = bodyWidth * printHeight;
+  const writingArea = bodyArea - lineArea;
 
   const annotationRatio = printArea > 0 ? (annotationArea / printArea) * 100 : 0;
   const lineRatio = printArea > 0 ? (lineArea / printArea) * 100 : 0;
+  const writingRatio = printArea > 0 ? (writingArea / printArea) * 100 : 0;
 
   return {
     paperArea,
@@ -38,6 +40,7 @@ export function calculateLayoutStats(params: LayoutParams): LayoutStats {
     lineArea,
     annotationRatio,
     lineRatio,
+    writingRatio,
     printWidth,
     printHeight,
     columnWidth,

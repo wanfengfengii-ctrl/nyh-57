@@ -14,8 +14,8 @@ const lineAreaDisplay = computed(() => formatArea(store.stats.lineArea));
 
 const annotationRatioDisplay = computed(() => formatRatio(store.stats.annotationRatio));
 const lineRatioDisplay = computed(() => formatRatio(store.stats.lineRatio));
-const writingRatio = computed(() => 100 - store.stats.annotationRatio - store.stats.lineRatio);
-const writingRatioDisplay = computed(() => formatRatio(writingRatio.value));
+const writingRatio = computed(() => store.stats.writingRatio);
+const writingRatioDisplay = computed(() => formatRatio(store.stats.writingRatio));
 
 const totalCells = computed(() => store.params.columnCount * store.params.rowCount);
 const cellCountDisplay = computed(() => `${store.params.columnCount} × ${store.params.rowCount} = ${totalCells.value} 格`);

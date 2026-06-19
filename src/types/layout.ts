@@ -26,6 +26,7 @@ export interface LayoutStats {
   lineArea: number;
   annotationRatio: number;
   lineRatio: number;
+  writingRatio: number;
   printWidth: number;
   printHeight: number;
   columnWidth: number;

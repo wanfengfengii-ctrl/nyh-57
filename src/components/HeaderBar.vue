@@ -61,6 +61,12 @@ async function handleFileChange(e: Event): Promise<void> {
         message.success('方案导入成功');
         input.value = '';
       },
+      onNegativeClick: () => {
+        input.value = '';
+      },
+      onClose: () => {
+        input.value = '';
+      },
     });
   }
 }
