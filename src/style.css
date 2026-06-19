@@ -1,0 +1,119 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-paper: #F5EFE0;
+  --color-paper-dark: #E8DFCC;
+  --color-ink: #3D2914;
+  --color-ink-light: #6B5B4F;
+  --color-ink-lighter: #8B7355;
+  --color-vermilion: #C41E3A;
+  --color-vermilion-dark: #8B0000;
+  --color-annotation: #2E4A62;
+  --color-writing: #8B4513;
+  --color-border: #D4C4A8;
+  --color-background: #F0EBE0;
+  --color-white: #FFFFFF;
+
+  --font-serif: 'Noto Serif SC', serif;
+  --font-sans: 'Noto Sans SC', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'Source Code Pro', monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+  font-family: var(--font-sans);
+  color: var(--color-ink);
+  background: var(--color-background);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+#app {
+  height: 100%;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-paper);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-ink-lighter);
+}
+
+::selection {
+  background: var(--color-vermilion);
+  color: var(--color-white);
+}
+
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: var(--color-background);
+}
+
+.main-content {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 320px 1fr 320px;
+  gap: 16px;
+  padding: 16px;
+  overflow: hidden;
+}
+
+.left-panel,
+.right-panel {
+  height: 100%;
+  overflow: hidden;
+}
+
+.center-panel {
+  height: 100%;
+  overflow: hidden;
+}
+
+@media (max-width: 1400px) {
+  .main-content {
+    grid-template-columns: 280px 1fr 280px;
+  }
+}
+
+@media (max-width: 1200px) {
+  .main-content {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
+    overflow-y: auto;
+  }
+
+  .left-panel,
+  .center-panel,
+  .right-panel {
+    height: auto;
+    min-height: 500px;
+  }
+
+  .center-panel {
+    order: -1;
+  }
+}
